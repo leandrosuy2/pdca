@@ -32,7 +32,14 @@ const decodeToken = (token: string) => {
 const brl = (n: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(n);
 
+const brlFromUnknown = (v: unknown) => {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? brl(n) : '—';
+};
+
 const pct = (n: number) => `${n.toFixed(1)}%`;
+
+const axisK = (v: unknown) => `${(Number(v) / 1000).toFixed(0)}k`;
 
 const medal = (rank: number) => (rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}º`);
 
@@ -158,9 +165,9 @@ export default function AdminInteligenciaPage() {
             <LineChart data={data?.months || []}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
               <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-              <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={axisK} />
               <Tooltip
-                formatter={(v: number) => brl(v)}
+                formatter={(value, name) => [brlFromUnknown(value), String(name ?? '')]}
                 labelFormatter={(l) => `Mês: ${l}`}
                 contentStyle={{ borderRadius: 12, border: '1px solid hsl(var(--border))' }}
               />
@@ -213,8 +220,8 @@ export default function AdminInteligenciaPage() {
               <BarChart data={data?.quarters || []}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                 <XAxis dataKey="key" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(v: number) => brl(v)} />
+                <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={axisK} />
+                <Tooltip formatter={(value, name) => [brlFromUnknown(value), String(name ?? '')]} />
                 <Bar dataKey="faturamento" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} name="Faturamento" />
                 <Bar dataKey="fopeg" fill="hsl(220 14% 46%)" radius={[6, 6, 0, 0]} name="FOPEG" />
               </BarChart>
