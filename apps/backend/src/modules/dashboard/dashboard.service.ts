@@ -1193,49 +1193,60 @@ export class DashboardService {
       );
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.transacao.deleteMany({ where: { userId: targetUserId } });
-      await tx.unidade.deleteMany({ where: { userId: targetUserId } });
-      await tx.categoria.deleteMany({ where: { userId: targetUserId } });
+    await this.prisma.$transaction(
+      async (tx) => {
+        await tx.transacao.deleteMany({ where: { userId: targetUserId } });
+        await tx.unidade.deleteMany({ where: { userId: targetUserId } });
+        await tx.categoria.deleteMany({ where: { userId: targetUserId } });
 
-      const unidadesCache = new Map<string, string>();
-      const categoriasCache = new Map<string, string>();
-
-      for (const row of parsedRows) {
-        let unidadeId = unidadesCache.get(row.unidadeName);
-        if (!unidadeId) {
+        const unidadeNames = [...new Set(parsedRows.map((r) => r.unidadeName))];
+        const unidadeIdByName = new Map<string, string>();
+        for (const name of unidadeNames) {
           const unidade = await tx.unidade.create({
-            data: { name: row.unidadeName, userId: targetUserId },
+            data: { name, userId: targetUserId },
           });
-          unidadeId = unidade.id;
-          unidadesCache.set(row.unidadeName, unidadeId);
+          unidadeIdByName.set(name, unidade.id);
         }
 
-        const categoriaKey = `${row.catName}::${row.tipo}`;
-        let categoriaId = categoriasCache.get(categoriaKey);
-        if (!categoriaId) {
+        const categoriaKey = (r: (typeof parsedRows)[0]) => `${r.catName}::${r.tipo}`;
+        const categoriaMetaByKey = new Map<string, { name: string; type: string }>();
+        for (const row of parsedRows) {
+          const key = categoriaKey(row);
+          if (!categoriaMetaByKey.has(key)) {
+            categoriaMetaByKey.set(key, { name: row.catName, type: row.tipo });
+          }
+        }
+        const categoriaIdByKey = new Map<string, string>();
+        for (const [key, meta] of categoriaMetaByKey) {
           const categoria = await tx.categoria.create({
-            data: { name: row.catName, type: row.tipo, userId: targetUserId },
+            data: { name: meta.name, type: meta.type, userId: targetUserId },
           });
-          categoriaId = categoria.id;
-          categoriasCache.set(categoriaKey, categoriaId);
+          categoriaIdByKey.set(key, categoria.id);
         }
 
-        await tx.transacao.create({
-          data: {
-            description: row.descr,
-            gestora: row.gestora,
-            amount: row.amount,
-            date: row.date,
-            type: row.tipo,
-            userId: targetUserId,
-            unidadeId,
-            categoriaId,
-            qtdFunc: row.qtdFunc,
-          },
-        });
-      }
-    });
+        const chunkSize = 500;
+        for (let i = 0; i < parsedRows.length; i += chunkSize) {
+          const slice = parsedRows.slice(i, i + chunkSize);
+          await tx.transacao.createMany({
+            data: slice.map((row) => ({
+              description: row.descr,
+              gestora: row.gestora,
+              amount: row.amount,
+              date: row.date,
+              type: row.tipo,
+              userId: targetUserId,
+              unidadeId: unidadeIdByName.get(row.unidadeName)!,
+              categoriaId: categoriaIdByKey.get(categoriaKey(row))!,
+              qtdFunc: row.qtdFunc,
+            })),
+          });
+        }
+      },
+      {
+        maxWait: 60_000,
+        timeout: 300_000,
+      },
+    );
 
     return {
       message: 'Planilha importada com sucesso!',

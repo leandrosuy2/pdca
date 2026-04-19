@@ -1,17 +1,18 @@
 ﻿'use client';
 
 import { getDashboardApiUrl } from '@/lib/api-url';
-import { Suspense, useState, useEffect, useRef } from "react";
+import { Suspense, useState, useEffect, useRef, Fragment, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import axios from "axios";
 import Cookies from "js-cookie";
+import { Loader2, CheckCircle2, XCircle, FileSpreadsheet } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, LabelList,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   AreaChart, Area, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ReferenceLine, ComposedChart
 } from "recharts";
 
-const TAB_KEYS = ['visaoGeral', 'porUnidade', 'porGestoras', 'custos', 'tendencia', 'pessoas', 'evolutivos'] as const;
+const TAB_KEYS = ['visaoGeral', 'porGestoras', 'custos', 'pessoas', 'porUnidade'] as const;
 type TabKey = typeof TAB_KEYS[number];
 const decodeToken = (token: string) => {
   try {
@@ -201,7 +202,6 @@ const ordenarUnidadesParaExibicao = (lista: any[]) => {
   const totais = lista.filter((item) => ehUnidadeTotal(item.nome));
   return [...comuns, ...totais];
 };
-const fmtNomeUnidade = (nome: string) => (nome.length > 18 ? `${nome.slice(0, 18)}...` : nome);
 const mapExpenseDefinitions = (items: any[] = []) =>
   items
     .map((item: any) => ({
@@ -458,6 +458,47 @@ const LabelLineValue = ({ x = 0, y = 0, value = 0, formatter = fmtPctCompact, co
   </text>
 );
 
+/** Rótulos externos no gráfico de pizza (Custos): nome, valor e %. */
+const renderPieCompositionDespesasLabel = (props: any) => {
+  const { cx, cy, midAngle, innerRadius, outerRadius, name, nome, value, percent } = props;
+  const label = String(nome ?? name ?? "").trim() || "—";
+  const RADIAN = Math.PI / 180;
+  const cos = Math.cos(-midAngle * RADIAN);
+  const sin = Math.sin(-midAngle * RADIAN);
+  const sx = cx + (outerRadius + 2) * cos;
+  const sy = cy + (outerRadius + 2) * sin;
+  const ex = cx + (outerRadius + 26) * cos;
+  const ey = cy + (outerRadius + 26) * sin;
+  const anchor = sx >= cx ? "start" : "end";
+  const dx = anchor === "start" ? 6 : -6;
+  const pct = ((percent ?? 0) * 100).toFixed(1);
+  const nomeCurto = label.length > 24 ? `${label.slice(0, 22)}…` : label;
+
+  return (
+    <g>
+      <path d={`M${sx},${sy}L${ex},${ey}`} stroke={PALETTE.borda} fill="none" strokeWidth={1.25} opacity={0.9} />
+      <text
+        x={ex + dx}
+        y={ey}
+        textAnchor={anchor}
+        dominantBaseline="middle"
+        fill={PALETTE.texto}
+        style={{ pointerEvents: "none" }}
+      >
+        <tspan x={ex + dx} dy="-0.85em" style={{ fontSize: 11, fontWeight: 800 }}>
+          {nomeCurto}
+        </tspan>
+        <tspan x={ex + dx} dy="1.2em" style={{ fontSize: 10, fontWeight: 700, fill: PALETTE.textoSec }}>
+          {fmt(toNum(value))}
+        </tspan>
+        <tspan x={ex + dx} dy="1.15em" style={{ fontSize: 11, fontWeight: 800, fill: PALETTE.laranja }}>
+          {pct}%
+        </tspan>
+      </text>
+    </g>
+  );
+};
+
 // Tooltip customizado
 const TooltipCustom = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -588,7 +629,7 @@ const s = {
   h2: { fontSize: 16, fontWeight: 700, color: PALETTE.texto, marginBottom: 16 },
 };
 
-const ABAS = ["Visao Geral", "Por Unidade", "Por Gestoras", "Custos", "Tendencia", "Pessoas", "Evolutivos"];
+const ABAS = ["Visao Geral", "Por Gestoras", "Custos", "Pessoas", "Por Unidade"];
 
 function DashboardContent() {
   const router = useRouter();
@@ -603,17 +644,23 @@ function DashboardContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [monthFilters, setMonthFilters] = useState<Record<TabKey, string>>({
     visaoGeral: '',
-    porUnidade: '',
     porGestoras: '',
     custos: '',
-    tendencia: '',
     pessoas: '',
-    evolutivos: '',
+    porUnidade: '',
   });
-  const [filtroUnid, setFiltroUnid] = useState<string>("Todas");
   const [filtroGestora, setFiltroGestora] = useState<string>("Todas");
   const [filtroUnidadeGestora, setFiltroUnidadeGestora] = useState<string>("Todas");
   const [filtroEvolutivoUnidade, setFiltroEvolutivoUnidade] = useState<string>("Todas");
+  const [importModal, setImportModal] = useState<{
+    open: boolean;
+    phase: "uploading" | "refreshing" | "success" | "error";
+    fileName?: string;
+    totalLines?: number;
+    dashboardId?: string;
+    ownerUserId?: string;
+    errorMessage?: string;
+  }>({ open: false, phase: "uploading" });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeTabKey = TAB_KEYS[aba] || 'visaoGeral';
@@ -626,7 +673,6 @@ function DashboardContent() {
     managers: dataMap.managers ?? { gestoras: [] },
     costs: dataMap.costs ?? { despesas: [], total: 0 },
     people: dataMap.people ?? { people: [], totalFopag: 0 },
-    trends: dataMap.trends ?? { trends: [] },
   });
 
   const fetchDashboardBundle = async (month?: string) => {
@@ -644,7 +690,6 @@ function DashboardContent() {
       ['managers', axios.get(`${getDashboardApiUrl()}/managers${qs}`, config)],
       ['costs', axios.get(`${getDashboardApiUrl()}/costs${qs}`, config)],
       ['people', axios.get(`${getDashboardApiUrl()}/people${qs}`, config)],
-      ['trends', axios.get(`${getDashboardApiUrl()}/trends${qs}`, config)],
       ['meta', activeDashboardId ? axios.get(`${getDashboardApiUrl()}/catalog/${activeDashboardId}?_t=${Date.now()}`, config) : Promise.resolve({ data: null })],
     ] as const;
 
@@ -664,9 +709,9 @@ function DashboardContent() {
     return { dataMap, failedKeys };
   };
 
-  const fetchData = async (options?: { includeFull?: boolean }) => {
+  const fetchData = async (options?: { includeFull?: boolean; skipPageLoading?: boolean }) => {
     try {
-      setLoading(true);
+      if (!options?.skipPageLoading) setLoading(true);
       setLoadError(null);
       const { dataMap, failedKeys } = await fetchDashboardBundle(activeMonthFilter || undefined);
 
@@ -687,7 +732,7 @@ function DashboardContent() {
       setDashboardData(buildDashboardPayload({}));
       if (!dashboardDataFull) setDashboardDataFull(buildDashboardPayload({}));
     } finally {
-      setLoading(false);
+      if (!options?.skipPageLoading) setLoading(false);
     }
   };
 
@@ -698,42 +743,67 @@ function DashboardContent() {
     const token = Cookies.get('token') || '';
     const currentUser = decodeToken(token);
     if (isAdminRole(currentUser?.role) && !activeDashboardId) {
-      alert('Selecione um dashboard antes de importar.');
       if (fileInputRef.current) fileInputRef.current.value = "";
-      router.push('/dashboards');
+      alert("Selecione um dashboard antes de importar.");
+      router.push("/dashboards");
       return;
     }
 
-    setLoading(true);
+    setImportModal({
+      open: true,
+      phase: "uploading",
+      fileName: file.name,
+    });
+
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      const importQs = activeDashboardId ? `?dashboardId=${activeDashboardId}` : '';
+      const importQs = activeDashboardId ? `?dashboardId=${activeDashboardId}` : "";
       const response = await axios.post(`${getDashboardApiUrl()}/import${importQs}`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` }
+        headers: { "Content-Type": "multipart/form-data", Authorization: `Bearer ${token}` },
       });
       const total = response?.data?.totalImportado;
       const targetDashboard = response?.data?.dashboardId;
       const targetOwner = response?.data?.ownerUserId;
-      alert(
-        `Planilha importada com sucesso!${
-          typeof total === 'number' ? ` Linhas: ${total}.` : ''
-        }${targetDashboard ? ` Dashboard: ${targetDashboard}.` : ''}${
-          targetOwner ? ` Usuario dono: ${targetOwner}.` : ''
-        }`,
-      );
-      await fetchData();
+
+      setImportModal({
+        open: true,
+        phase: "refreshing",
+        fileName: file.name,
+        totalLines: typeof total === "number" ? total : undefined,
+        dashboardId: typeof targetDashboard === "string" ? targetDashboard : undefined,
+        ownerUserId: typeof targetOwner === "string" ? targetOwner : undefined,
+      });
+
+      await fetchData({ includeFull: true, skipPageLoading: true });
+
+      setImportModal({
+        open: true,
+        phase: "success",
+        fileName: file.name,
+        totalLines: typeof total === "number" ? total : undefined,
+        dashboardId: typeof targetDashboard === "string" ? targetDashboard : undefined,
+        ownerUserId: typeof targetOwner === "string" ? targetOwner : undefined,
+      });
     } catch (error) {
       console.error(error);
       const message = axios.isAxiosError(error)
         ? (error.response?.data?.message || error.message)
-        : 'Falha desconhecida';
-      alert(`Erro ao importar planilha: ${message}`);
-      setLoading(false);
+        : "Falha desconhecida";
+      setImportModal({
+        open: true,
+        phase: "error",
+        fileName: file.name,
+        errorMessage: String(message),
+      });
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  const closeImportModal = () => {
+    setImportModal({ open: false, phase: "uploading" });
   };
 
   useEffect(() => {
@@ -935,7 +1005,6 @@ function DashboardContent() {
     valor: d.value
   }));
 
-  const categoriasEventos = categoriasDespesa; // Mock
   const totalReceita = dashboardData.overview.kpis.receitaTotal;
   const totalDespesa = dashboardData.overview.kpis.despesaTotal;
   const totalLucro = dashboardData.overview.kpis.lucro;
@@ -957,26 +1026,7 @@ function DashboardContent() {
     dashboardData.overview.kpis.percentualSobreFaturamento ??
       (totalReceita > 0 ? totalDespesa / totalReceita : 0),
   );
-  
-  const acumulados = (() => {
-    let recAcum = 0;
-    let despAcum = 0;
-    return meses.map((m: any) => {
-      recAcum += toNum(m.receita);
-      despAcum += toNum(m.despesa);
-      return {
-        mes: m.mes,
-        mesLabel: m.mesLabel,
-        recAcum,
-        despAcum,
-        lucroAcum: recAcum - despAcum,
-      };
-    });
-  })();
-  const margemMensalSeries = meses.map((m: any) => ({
-    ...m,
-    margem: m.receita > 0 ? m.lucro / m.receita : 0,
-  }));
+
   const setMonthFilterForTab = (tabKey: TabKey, month: string) =>
     setMonthFilters((current) => ({ ...current, [tabKey]: month }));
   const renderMonthFilter = (tabKey: TabKey, options: Array<{ value: string; label: string }>) => (
@@ -1250,198 +1300,25 @@ function DashboardContent() {
     );
   };
 
-  // â”€â”€ ABA 1: POR UNIDADE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const AbaPorUnidade = () => {
-    const possuiFiltroUnidade = filtroUnid !== "Todas" && !!filtroUnid;
-    const unidadeSelecionada = possuiFiltroUnidade
-      ? unidades.find((u: any) => u.nome === filtroUnid) || null
-      : null;
-    const dataFiltrada = possuiFiltroUnidade
-      ? (unidadeSelecionada ? [unidadeSelecionada] : [])
-      : unidades;
-    const alturaGraficoUnidades = Math.max(dataFiltrada.length * 42, 320);
-    const larguraEixoUnidades = 150;
-    const monthlyUnitSeries = possuiFiltroUnidade
-      ? unidadeSelecionada?.monthly || []
-      : buildMonthlySeries(unidades);
-    const definicoesDespesa = possuiFiltroUnidade
-      ? unidadeSelecionada?.expenseDefinitions || []
-      : mergeExpenseDefinitions(dataFiltrada);
-    const alturaGraficoDefinicoes = Math.max(definicoesDespesa.length * 34, 260);
-    const monthOptions = getMonthOptionsFromSeries(buildMonthlySeries(unidadesFull));
-
-    return (
-    <>
-      {/* ROW BOTÃ•ES */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-        {["Todas", ...unidadesFull.map((u:any) => u.nome)].map(name => (
-            <button 
-              key={name}
-              onClick={() => setFiltroUnid(name)}
-              style={s.badge(filtroUnid === name)}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-        {renderMonthFilter('porUnidade', monthOptions)}
-
-        <div style={s.card}>
-          <div style={s.titulo}>RECEITA X DESPESA POR UNIDADE</div>
-          <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
-            <ResponsiveContainer width="100%" height={alturaGraficoUnidades}>
-              <BarChart layout="vertical" data={dataFiltrada} barGap={6} margin={{ top: 4, right: 24, bottom: 4, left: 12 }}>
-                <CartesianGrid {...CHART_THEME.gridHorizontal} />
-                <XAxis type="number" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                <YAxis
-                  type="category"
-                  dataKey="nome"
-                  interval={0}
-                  tickFormatter={fmtNomeUnidade}
-                  {...CHART_THEME.axisCategory}
-                  width={larguraEixoUnidades}
-                />
-                {chartTooltip}
-                <Legend wrapperStyle={CHART_THEME.legend} />
-                <Bar dataKey="receita" name="Receita" fill={PALETTE.azul} radius={CHART_THEME.barRadiusSide}>
-                  <LabelList dataKey="receita" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.azul} />} />
-                  <LabelList dataKey="margem" content={<LabelMargemLucro />} />
-                </Bar>
-                <Bar dataKey="despesa" name="Despesa" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusSide}>
-                  <LabelList dataKey="despesa" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div style={s.card}>
-          <div style={s.titulo}>RESULTADO POR UNIDADE</div>
-          <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
-            <ResponsiveContainer width="100%" height={alturaGraficoUnidades}>
-              <BarChart layout="vertical" data={dataFiltrada} barGap={6} margin={{ top: 4, right: 24, bottom: 4, left: 12 }}>
-                <CartesianGrid {...CHART_THEME.gridHorizontal} />
-                <XAxis type="number" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                <YAxis
-                  type="category"
-                  dataKey="nome"
-                  interval={0}
-                  tickFormatter={fmtNomeUnidade}
-                  {...CHART_THEME.axisCategory}
-                  width={larguraEixoUnidades}
-                />
-                {chartTooltip}
-                <ReferenceLine x={0} stroke={PALETTE.textoSec} />
-                <Bar dataKey="lucro" name="Resultado" radius={CHART_THEME.barRadiusSide}>
-                  {dataFiltrada.map((u: any) => <Cell key={u.nome} fill={u.lucro >= 0 ? PALETTE.verde : PALETTE.vermelho} />)}
-                  <LabelList dataKey="lucro" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.texto} />} />
-                  <LabelList dataKey="margem" content={<LabelMargemLucro />} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div style={s.card}>
-          <div style={s.titulo}>{unidadeSelecionada ? "DESPESAS POR DEFINICAO DA UNIDADE" : "DESPESAS POR DEFINICAO DAS UNIDADES FILTRADAS"}</div>
-          {definicoesDespesa.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: PALETTE.textoSec, fontSize: 14 }}>
-              Nao ha despesas por definicao para o filtro aplicado.
-            </div>
-          ) : (
-            <div style={{ maxHeight: 420, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
-              <ResponsiveContainer width="100%" height={alturaGraficoDefinicoes}>
-                <BarChart layout="vertical" data={definicoesDespesa} barGap={6} margin={{ top: 4, right: 24, bottom: 4, left: 12 }}>
-                  <CartesianGrid {...CHART_THEME.gridHorizontal} />
-                  <XAxis type="number" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                  <YAxis
-                    type="category"
-                    dataKey="nome"
-                    interval={0}
-                    tickFormatter={fmtNomeUnidade}
-                    {...CHART_THEME.axisCategory}
-                    width={170}
-                  />
-                  {chartTooltip}
-                  <Bar dataKey="valor" name="Despesa" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusSide}>
-                    <LabelList dataKey="valor" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
-        <div style={s.card}>
-          <div style={s.titulo}>EVOLUCAO MENSAL DA UNIDADE</div>
-          {monthlyUnitSeries.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 240, color: PALETTE.textoSec, fontSize: 14 }}>
-              Nao ha historico mensal disponivel para {unidadeSelecionada ? unidadeSelecionada.nome : "as unidades"}.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={320}>
-              <ComposedChart data={monthlyUnitSeries} barGap={4}>
-                <CartesianGrid {...CHART_THEME.grid} />
-                <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
-                <YAxis yAxisId="valor" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                <YAxis yAxisId="percentual" orientation="right" domain={getPercentDomain(monthlyUnitSeries, 'lucroPct')} tickFormatter={fmtPct} {...CHART_THEME.axisPercent} />
-                {chartTooltip}
-                <Legend wrapperStyle={CHART_THEME.legend} />
-                <Bar yAxisId="valor" dataKey="receita" name="Receita" fill={PALETTE.azul} radius={CHART_THEME.barRadiusTop}>
-                  <LabelList dataKey="receita" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.azul} />} />
-                </Bar>
-                <Bar yAxisId="valor" dataKey="despesa" name="Despesa" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusTop}>
-                  <LabelList dataKey="despesa" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
-                </Bar>
-                <Bar yAxisId="valor" dataKey="lucro" name="Resultado" fill={PALETTE.verde} radius={CHART_THEME.barRadiusTop}>
-                  <LabelList dataKey="lucro" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.verde} />} />
-                </Bar>
-                <Line yAxisId="percentual" type="monotone" dataKey="lucroPct" name="% Lucro" stroke={PALETTE.laranja} {...CHART_THEME.line} dot={{ ...CHART_THEME.line.dot, fill: PALETTE.laranja }} activeDot={{ ...CHART_THEME.line.activeDot }} label={<LabelLineValue formatter={fmtPctCompact} color={PALETTE.laranja} />} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div style={s.card}>
-          <div style={s.titulo}>DETALHAMENTO POR UNIDADE</div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: "600px", marginTop: 10 }}>
-              <thead>
-                <tr>
-                  {["Unidade","Receita","Despesa","Resultado","Margem","FOPAG","Funcionários"].map(h => (
-                    <th key={h} style={{ color: PALETTE.textoSec, fontWeight: 700, padding: "8px 12px", textAlign: "left", borderBottom: `1px solid ${PALETTE.borda}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {dataFiltrada.map((u: any, i: number) => (
-                  <tr
-                    key={i}
-                    style={{
-                      borderBottom: `1px solid ${PALETTE.borda}20`,
-                      cursor: "default",
-                      background: ehUnidadeTotal(u.nome) ? `${PALETTE.azul}12` : "transparent"
-                    }}
-                  >
-                    <td style={{ padding: "10px 12px", fontWeight: 600 }}>{u.nome}</td>
-                    <td style={{ padding: "10px 12px", color: PALETTE.verde }}>{fmtK(u.receita)}</td>
-                    <td style={{ padding: "10px 12px", color: PALETTE.vermelho }}>{fmtK(u.despesa)}</td>
-                    <td style={{ padding: "10px 12px", color: u.lucro >= 0 ? PALETTE.verde : PALETTE.vermelho, fontWeight: 700 }}>{fmtK(u.lucro)}</td>
-                    <td style={{ padding: "10px 12px" }}>{fmtPct(u.margem)}</td>
-                    <td style={{ padding: "10px 12px" }}>{fmtK(u.fopag)}</td>
-                    <td style={{ padding: "10px 12px" }}>{u.func}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </>
-    );
-  };
-
-  // â”€â”€ ABA 2: CUSTOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ ABA: CUSTOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const AbaPorGestoras = () => {
+    type DetalhamentoGestoraMesCell = {
+      mesLabel: string;
+      receita: number;
+      despesa: number;
+      lucro: number;
+      /** lucro ÷ receita no mês; null se não houver receita */
+      pctLucroSobreRec: number | null;
+    };
+    type DetalhamentoGestoraRow = {
+      nome: string;
+      monthCells: DetalhamentoGestoraMesCell[];
+      totalReceita: number;
+      totalDespesa: number;
+      totalLucro: number;
+      pctMargem: number;
+      pctDespSobreRec: number;
+    };
     const nomesCategoriasCusto = new Set(
       categoriasDespesa.map((item: any) => normalizarTexto(item.nome)),
     );
@@ -1474,8 +1351,6 @@ function DashboardContent() {
       : possuiFiltroGestora
         ? (gestoraSelecionada?.units || [])
         : gestorasBase;
-    const alturaGraficoGestoras = Math.max(dataComparativa.length * 42, 320);
-    const larguraEixoGestoras = 150;
     const receitaExibida = possuiFiltroUnidadeGestora
       ? unidadeSelecionada?.receita || 0
       : possuiFiltroGestora
@@ -1501,13 +1376,98 @@ function DashboardContent() {
       : possuiFiltroGestora
         ? (gestoraSelecionada?.monthly || [])
         : buildMonthlySeries(gestorasBase);
-    const definicoesDespesa = possuiFiltroUnidadeGestora
-      ? unidadeSelecionada?.expenseDefinitions || []
-      : possuiFiltroGestora
-        ? gestoraSelecionada?.expenseDefinitions || []
-        : mergeExpenseDefinitions(dataComparativa);
-    const alturaGraficoDefinicoes = Math.max(definicoesDespesa.length * 34, 260);
     const monthOptions = getMonthOptionsFromSeries(buildMonthlySeries(gestorasBaseFull));
+    const monthFilterPorGestoras = monthFilters.porGestoras || "";
+    const estiloColunaTotalGestDet = {
+      padding: "8px 12px" as const,
+      textAlign: "right" as const,
+      verticalAlign: "middle" as const,
+    };
+    const bordaEntreGestorasDet = `4px solid rgba(127, 147, 172, 0.45)`;
+    const bordaEntreLinhasDet = `1px solid ${PALETTE.borda}`;
+    const renderCelulaTotalGestDet = (
+      valor: ReactNode,
+      pctLinha: string | null,
+      opts: { corValor: string; corPct?: string },
+      borderBottom?: string,
+    ) => (
+      <td style={{ ...estiloColunaTotalGestDet, ...(borderBottom ? { borderBottom } : {}) }}>
+        <div style={{ fontWeight: 700, color: opts.corValor, fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>{valor}</div>
+        <div
+          style={{
+            height: 1,
+            margin: "7px 0 5px",
+            marginLeft: "auto",
+            width: "72%",
+            maxWidth: 120,
+            background: PALETTE.borda,
+            opacity: 0.45,
+          }}
+        />
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: opts.corPct ?? PALETTE.textoSec,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {pctLinha ?? "—"}
+        </div>
+      </td>
+    );
+
+    const monthMetaListGestorasDet = (() => {
+      const map = new Map<string, { mes: string; mesLabel: string }>();
+      for (const item of dataComparativa) {
+        for (const entry of item.monthly || []) {
+          if (monthFilterPorGestoras && String(entry.mes) !== monthFilterPorGestoras) continue;
+          const mes = String(entry.mes || "");
+          if (!mes) continue;
+          const mesLabel = String(entry.mesLabel || mes);
+          if (!map.has(mes)) map.set(mes, { mes, mesLabel });
+        }
+      }
+      return Array.from(map.values()).sort((a, b) => a.mes.localeCompare(b.mes));
+    })();
+    const detalhamentoMensalGestorasRows: DetalhamentoGestoraRow[] = dataComparativa
+      .map((item: any): DetalhamentoGestoraRow => {
+        const monthCells: DetalhamentoGestoraMesCell[] = [];
+        let sumLucro = 0;
+        let sumReceita = 0;
+        let sumDespesa = 0;
+        for (const { mes, mesLabel } of monthMetaListGestorasDet) {
+          const m = (item.monthly || []).find((x: any) => String(x.mes) === mes);
+          const rec = m ? toNum(m.receita) : 0;
+          const desp = m ? toNum(m.despesa) : 0;
+          const luc = m ? toNum(m.lucro) : 0;
+          const pctLucroSobreRec = rec !== 0 ? luc / rec : null;
+          monthCells.push({ mesLabel, receita: rec, despesa: desp, lucro: luc, pctLucroSobreRec });
+          sumLucro += luc;
+          sumReceita += rec;
+          sumDespesa += desp;
+        }
+        const pctMargem = sumReceita !== 0 ? sumLucro / sumReceita : 0;
+        const pctDespSobreRec = sumReceita !== 0 ? sumDespesa / sumReceita : 0;
+        return {
+          nome: item.nome,
+          monthCells,
+          totalReceita: sumReceita,
+          totalDespesa: sumDespesa,
+          totalLucro: sumLucro,
+          pctMargem,
+          pctDespSobreRec,
+        };
+      })
+      .filter(
+        (row: DetalhamentoGestoraRow) =>
+          row.totalLucro !== 0 ||
+          row.totalReceita !== 0 ||
+          row.totalDespesa !== 0 ||
+          row.monthCells.some(
+            (c: DetalhamentoGestoraMesCell) => c.receita !== 0 || c.despesa !== 0 || c.lucro !== 0,
+          ),
+      );
 
     return (
       <>
@@ -1556,92 +1516,6 @@ function DashboardContent() {
         </div>
 
         <div style={s.card}>
-          <div style={s.titulo}>{unidadeSelecionada ? "RECEITA X DESPESA DA UNIDADE SELECIONADA" : gestoraSelecionada ? "RECEITA X DESPESA DAS UNIDADES DA GESTORA" : "RECEITA X DESPESA POR GESTORA"}</div>
-          <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
-            <ResponsiveContainer width="100%" height={alturaGraficoGestoras}>
-              <BarChart layout="vertical" data={dataComparativa} barGap={6} margin={{ top: 4, right: 24, bottom: 4, left: 12 }}>
-                <CartesianGrid {...CHART_THEME.gridHorizontal} />
-                <XAxis type="number" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                <YAxis
-                  type="category"
-                  dataKey="nome"
-                  interval={0}
-                  tickFormatter={fmtNomeUnidade}
-                  {...CHART_THEME.axisCategory}
-                  width={larguraEixoGestoras}
-                />
-                {chartTooltip}
-                <Legend wrapperStyle={CHART_THEME.legend} />
-                <Bar dataKey="receita" name="Receita" fill={PALETTE.azul} radius={CHART_THEME.barRadiusSide}>
-                  <LabelList dataKey="receita" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.azul} />} />
-                  <LabelList dataKey="margem" content={<LabelMargemLucro />} />
-                </Bar>
-                <Bar dataKey="despesa" name="Despesa" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusSide}>
-                  <LabelList dataKey="despesa" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div style={s.card}>
-          <div style={s.titulo}>{unidadeSelecionada ? "RESULTADO DA UNIDADE SELECIONADA" : gestoraSelecionada ? "RESULTADO DAS UNIDADES DA GESTORA" : "RESULTADO POR GESTORA"}</div>
-          <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
-            <ResponsiveContainer width="100%" height={alturaGraficoGestoras}>
-              <BarChart layout="vertical" data={dataComparativa} barGap={6} margin={{ top: 4, right: 24, bottom: 4, left: 12 }}>
-                <CartesianGrid {...CHART_THEME.gridHorizontal} />
-                <XAxis type="number" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                <YAxis
-                  type="category"
-                  dataKey="nome"
-                  interval={0}
-                  tickFormatter={fmtNomeUnidade}
-                  {...CHART_THEME.axisCategory}
-                  width={larguraEixoGestoras}
-                />
-                {chartTooltip}
-                <ReferenceLine x={0} stroke={PALETTE.textoSec} />
-                <Bar dataKey="lucro" name="Resultado" radius={CHART_THEME.barRadiusSide}>
-                  {dataComparativa.map((item: any) => <Cell key={item.nome} fill={item.lucro >= 0 ? PALETTE.verde : PALETTE.vermelho} />)}
-                  <LabelList dataKey="lucro" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.texto} />} />
-                  <LabelList dataKey="margem" content={<LabelMargemLucro />} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div style={s.card}>
-          <div style={s.titulo}>{unidadeSelecionada ? "DESPESAS POR DEFINICAO DA UNIDADE" : gestoraSelecionada ? "DESPESAS POR DEFINICAO DA GESTORA" : "DESPESAS POR DEFINICAO DAS GESTORAS FILTRADAS"}</div>
-          {definicoesDespesa.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: PALETTE.textoSec, fontSize: 14 }}>
-              Nao ha despesas por definicao para o filtro aplicado.
-            </div>
-          ) : (
-            <div style={{ maxHeight: 420, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
-              <ResponsiveContainer width="100%" height={alturaGraficoDefinicoes}>
-                <BarChart layout="vertical" data={definicoesDespesa} barGap={6} margin={{ top: 4, right: 24, bottom: 4, left: 12 }}>
-                  <CartesianGrid {...CHART_THEME.gridHorizontal} />
-                  <XAxis type="number" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                  <YAxis
-                    type="category"
-                    dataKey="nome"
-                    interval={0}
-                    tickFormatter={fmtNomeUnidade}
-                    {...CHART_THEME.axisCategory}
-                    width={170}
-                  />
-                  {chartTooltip}
-                  <Bar dataKey="valor" name="Despesa" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusSide}>
-                    <LabelList dataKey="valor" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
-        <div style={s.card}>
           <div style={s.titulo}>{unidadeSelecionada ? "EVOLUCAO MENSAL DA UNIDADE" : "EVOLUCAO MENSAL DA GESTORA"}</div>
           {monthlyExibido.length === 0 ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 240, color: PALETTE.textoSec, fontSize: 14 }}>
@@ -1673,28 +1547,228 @@ function DashboardContent() {
 
         <div style={s.card}>
           <div style={s.titulo}>{unidadeSelecionada ? "DETALHAMENTO DA UNIDADE SELECIONADA" : gestoraSelecionada ? "DETALHAMENTO DAS UNIDADES DA GESTORA" : "DETALHAMENTO POR GESTORA"}</div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: "600px", marginTop: 10 }}>
-              <thead>
-                <tr>
-                  {[(gestoraSelecionada ? "Unidade" : "Gestora"),"Receita","Despesa","Resultado","Margem"].map(h => (
-                    <th key={h} style={{ color: PALETTE.textoSec, fontWeight: 700, padding: "8px 12px", textAlign: "left", borderBottom: `1px solid ${PALETTE.borda}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {dataComparativa.map((item: any, i: number) => (
-                  <tr key={i} style={{ borderBottom: `1px solid ${PALETTE.borda}20` }}>
-                    <td style={{ padding: "10px 12px", fontWeight: 600 }}>{item.nome}</td>
-                    <td style={{ padding: "10px 12px", color: PALETTE.verde }}>{fmtK(item.receita)}</td>
-                    <td style={{ padding: "10px 12px", color: PALETTE.vermelho }}>{fmtK(item.despesa)}</td>
-                    <td style={{ padding: "10px 12px", color: item.lucro >= 0 ? PALETTE.verde : PALETTE.vermelho, fontWeight: 700 }}>{fmtK(item.lucro)}</td>
-                    <td style={{ padding: "10px 12px" }}>{fmtPct(item.margem)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 14 }}>
+            Por mês: receita, despesas e resultado (lucro). Cada gestora fica em um bloco separado por linha grossa.
+            Na linha Resultado, abaixo de cada valor mensal aparece a margem do mês (lucro ÷ receita). Em Total período,
+            o total e a margem do período vêm empilhados.
           </div>
+          {detalhamentoMensalGestorasRows.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, color: PALETTE.textoSec, fontSize: 14 }}>
+              Não há histórico mensal para o filtro aplicado.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 560 }}>
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        color: PALETTE.textoSec,
+                        fontWeight: 700,
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        borderBottom: `1px solid ${PALETTE.borda}`,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.8,
+                      }}
+                    >
+                      {gestoraSelecionada ? "Unidade" : "Gestora"}
+                    </th>
+                    <th
+                      style={{
+                        color: PALETTE.textoSec,
+                        fontWeight: 700,
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        borderBottom: `1px solid ${PALETTE.borda}`,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.8,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      Linha
+                    </th>
+                    {monthMetaListGestorasDet.map(({ mesLabel }) => (
+                      <th
+                        key={mesLabel}
+                        style={{
+                          color: PALETTE.textoSec,
+                          fontWeight: 700,
+                          padding: "10px 12px",
+                          textAlign: "right",
+                          borderBottom: `1px solid ${PALETTE.borda}`,
+                          fontSize: 11,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.8,
+                        }}
+                      >
+                        {mesLabel}
+                      </th>
+                    ))}
+                    <th
+                      style={{
+                        color: PALETTE.textoSec,
+                        fontWeight: 700,
+                        padding: "10px 12px",
+                        textAlign: "right",
+                        borderBottom: `1px solid ${PALETTE.borda}`,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.8,
+                      }}
+                    >
+                      Total período
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detalhamentoMensalGestorasRows.map((row) => (
+                    <Fragment key={row.nome}>
+                      <tr>
+                        <td
+                          rowSpan={3}
+                          style={{
+                            padding: "10px 12px",
+                            fontWeight: 600,
+                            color: PALETTE.texto,
+                            verticalAlign: "middle",
+                            borderBottom: bordaEntreGestorasDet,
+                          }}
+                        >
+                          {row.nome}
+                        </td>
+                        <td
+                          style={{
+                            padding: "8px 12px",
+                            fontWeight: 600,
+                            color: PALETTE.textoSec,
+                            fontSize: 12,
+                            whiteSpace: "nowrap",
+                            borderBottom: bordaEntreLinhasDet,
+                          }}
+                        >
+                          Receita
+                        </td>
+                        {row.monthCells.map((cell) => (
+                          <td
+                            key={`${row.nome}-rec-${cell.mesLabel}`}
+                            style={{
+                              padding: "8px 12px",
+                              textAlign: "right",
+                              color: PALETTE.azul,
+                              fontWeight: 600,
+                              borderBottom: bordaEntreLinhasDet,
+                            }}
+                          >
+                            {fmt(toNum(cell.receita))}
+                          </td>
+                        ))}
+                        {renderCelulaTotalGestDet(fmt(toNum(row.totalReceita)), null, { corValor: PALETTE.azul }, bordaEntreLinhasDet)}
+                      </tr>
+                      <tr>
+                        <td
+                          style={{
+                            padding: "8px 12px",
+                            fontWeight: 600,
+                            color: PALETTE.textoSec,
+                            fontSize: 12,
+                            whiteSpace: "nowrap",
+                            borderBottom: bordaEntreLinhasDet,
+                          }}
+                        >
+                          Despesas
+                        </td>
+                        {row.monthCells.map((cell) => (
+                          <td
+                            key={`${row.nome}-desp-${cell.mesLabel}`}
+                            style={{
+                              padding: "8px 12px",
+                              textAlign: "right",
+                              color: PALETTE.vermelho,
+                              fontWeight: 600,
+                              borderBottom: bordaEntreLinhasDet,
+                            }}
+                          >
+                            {fmt(toNum(cell.despesa))}
+                          </td>
+                        ))}
+                        {renderCelulaTotalGestDet(
+                          fmt(toNum(row.totalDespesa)),
+                          `${(row.pctDespSobreRec * 100).toFixed(2)}% da receita`,
+                          {
+                            corValor: PALETTE.vermelho,
+                            corPct: row.pctDespSobreRec > 1 ? PALETTE.vermelho : PALETTE.textoSec,
+                          },
+                          bordaEntreLinhasDet,
+                        )}
+                      </tr>
+                      <tr>
+                        <td
+                          style={{
+                            padding: "8px 12px",
+                            fontWeight: 600,
+                            color: PALETTE.textoSec,
+                            fontSize: 12,
+                            whiteSpace: "nowrap",
+                            borderBottom: bordaEntreGestorasDet,
+                          }}
+                        >
+                          Resultado
+                        </td>
+                        {row.monthCells.map((cell) => {
+                          const pctMes = cell.pctLucroSobreRec;
+                          const pctNeg = pctMes !== null && pctMes < 0;
+                          return (
+                            <td
+                              key={`${row.nome}-luc-${cell.mesLabel}`}
+                              style={{
+                                padding: "8px 12px",
+                                textAlign: "right",
+                                verticalAlign: "top",
+                                borderBottom: bordaEntreGestorasDet,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: 600,
+                                  color: cell.lucro < 0 ? PALETTE.vermelho : PALETTE.verde,
+                                  fontVariantNumeric: "tabular-nums",
+                                }}
+                              >
+                                {fmt(toNum(cell.lucro))}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  marginTop: 5,
+                                  color: pctNeg ? PALETTE.vermelho : PALETTE.textoSec,
+                                  fontVariantNumeric: "tabular-nums",
+                                }}
+                              >
+                                {pctMes === null ? "—" : `${(pctMes * 100).toFixed(2)}%`}
+                              </div>
+                            </td>
+                          );
+                        })}
+                        {renderCelulaTotalGestDet(
+                          fmt(toNum(row.totalLucro)),
+                          `${(row.pctMargem * 100).toFixed(2)}% margem`,
+                          {
+                            corValor: row.totalLucro < 0 ? PALETTE.vermelho : PALETTE.verde,
+                            corPct: row.pctMargem < 0 ? PALETTE.vermelho : PALETTE.textoSec,
+                          },
+                          bordaEntreGestorasDet,
+                        )}
+                      </tr>
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </>
     );
@@ -1706,21 +1780,79 @@ function DashboardContent() {
     const pieData = top5.length ? [...top5] : [];
     if (outros > 0) pieData.push({ nome: "Outros", valor: outros });
     const CORES_PIE = [PALETTE.vermelho, PALETTE.laranja, PALETTE.azul, PALETTE.roxo, PALETTE.rosa, PALETTE.cinza];
-    const rankingDespesas = [...categoriasDespesa].sort((a: any, b: any) => b.valor - a.valor);
-    const topCategorias = rankingDespesas.slice(0, 10).map((item: any, index: number) => ({
-      ...item,
-      pct: totalDespesa > 0 ? item.valor / totalDespesa : 0,
-      cor: CORES_PIE[index % CORES_PIE.length]
-    }));
-    const alturaTopCategorias = Math.max(topCategorias.length * 34, 280);
-    const maiorCategoria = rankingDespesas[0];
-    const top3Total = rankingDespesas.slice(0, 3).reduce((acc: number, item: any) => acc + item.valor, 0);
-    const top5Total = top5.reduce((acc: number, item: any) => acc + item.valor, 0);
+    const pieTotalValor = pieData.reduce((acc: number, d: any) => acc + toNum(d.valor), 0);
+    const top5CategoriasMaiores = [...categoriasDespesa].sort((a: any, b: any) => b.valor - a.valor).slice(0, 5);
     const custosMensais = meses.map((m: any) => ({
       ...m,
       custoPct: m.receita > 0 ? m.despesa / m.receita : 0,
     }));
-    let acumuladoDespesas = 0;
+    const monthFilterCustos = monthFilters.custos || '';
+    const unitsCategoriasTabela = ordenarUnidadesParaExibicao(
+      unidadesFull.filter((u: any) => !ehUnidadeTotal(String(u.nome || ''))),
+    );
+    const monthMetaListCustos = (() => {
+      const map = new Map<string, { mes: string; mesLabel: string }>();
+      for (const u of unitsCategoriasTabela) {
+        for (const def of u.expenseDefinitionsMonthly || []) {
+          for (const entry of def.monthly || []) {
+            if (monthFilterCustos && String(entry.mes) !== monthFilterCustos) continue;
+            const mes = String(entry.mes || '');
+            if (!mes) continue;
+            const mesLabel = String(entry.mesLabel || mes);
+            if (!map.has(mes)) map.set(mes, { mes, mesLabel });
+          }
+        }
+      }
+      return Array.from(map.values()).sort((a, b) => a.mes.localeCompare(b.mes));
+    })();
+    const catMesValorCustos = new Map<string, Map<string, number>>();
+    const bumpCatMes = (nome: string, mes: string, valor: number) => {
+      if (!catMesValorCustos.has(nome)) catMesValorCustos.set(nome, new Map());
+      const inner = catMesValorCustos.get(nome)!;
+      inner.set(mes, (inner.get(mes) ?? 0) + valor);
+    };
+    for (const u of unitsCategoriasTabela) {
+      for (const def of u.expenseDefinitionsMonthly || []) {
+        const nome = String(def.nome || 'Outros');
+        for (const entry of def.monthly || []) {
+          if (monthFilterCustos && String(entry.mes) !== monthFilterCustos) continue;
+          const mes = String(entry.mes || '');
+          if (!mes) continue;
+          bumpCatMes(nome, mes, toNum(entry.valor));
+        }
+      }
+    }
+    const receitaPorMesCustos = new Map<string, number>();
+    for (const { mes } of monthMetaListCustos) {
+      let r = 0;
+      for (const u of unitsCategoriasTabela) {
+        const m = (u.monthly || []).find((x: any) => String(x.mes) === mes);
+        r += m ? toNum(m.receita) : 0;
+      }
+      receitaPorMesCustos.set(mes, r);
+    }
+    const receitaPeriodoCustos = monthMetaListCustos.reduce(
+      (acc, { mes }) => acc + (receitaPorMesCustos.get(mes) ?? 0),
+      0,
+    );
+    const comparativoMensalCategoriasRows = Array.from(catMesValorCustos.entries())
+      .map(([nome, mesMap]) => {
+        const cellByLabel: Record<string, number> = {};
+        let resultado = 0;
+        for (const { mes, mesLabel } of monthMetaListCustos) {
+          const v = mesMap.get(mes) ?? 0;
+          cellByLabel[mesLabel] = v;
+          resultado += v;
+        }
+        const percentual = receitaPeriodoCustos > 0 ? resultado / receitaPeriodoCustos : 0;
+        return { nome, cellByLabel, resultado, percentual };
+      })
+      .filter(
+        (row) =>
+          row.resultado !== 0 ||
+          monthMetaListCustos.some(({ mesLabel }) => toNum(row.cellByLabel[mesLabel]) !== 0),
+      )
+      .sort((a, b) => b.resultado - a.resultado);
     return (
       <>
         {renderMonthFilter('custos', getMonthOptionsFromSeries(mesesFull))}
@@ -1764,199 +1896,228 @@ function DashboardContent() {
           )}
         </div>
 
-        <div style={s.row}>
-          <div style={{ ...s.card, flex: 1, minWidth: 300 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 380px), 1fr))",
+            gap: 16,
+            alignItems: "stretch",
+          }}
+        >
+          <div style={{ ...s.card, minHeight: 480 }}>
             <div style={s.titulo}>Composição das Despesas (Top 5 + Outros)</div>
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={pieData} dataKey="valor" nameKey="nome" cx="50%" cy="50%" outerRadius={100} label={(props: any) => `${props.nome || props.name} ${((props.percent || 0)*100).toFixed(0)}%`} labelLine={{ stroke: PALETTE.borda }}>
-                  {pieData.map((_: any, i: number) => <Cell key={i} fill={CORES_PIE[i % CORES_PIE.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v: any) => fmtK(v)} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div style={{ ...s.card, flex: 1.5, minWidth: 300 }}>
-            <div style={s.titulo}>Detalhamento de Despesas por Categoria</div>
-            <div style={{ maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
-              {categoriasDespesa.map((c: any, i: number) => {
-                const pct = totalReceita > 0 ? c.valor / totalReceita : 0;
-                return (
-                  <div key={i} style={{ marginBottom: 10 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-                      <span style={{ fontSize: 13 }}>{c.nome}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: PALETTE.vermelho }}>{fmtK(c.valor)}</span>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ flex: 1, background: PALETTE.borda, borderRadius: 4, height: 6 }}>
-                        <div style={{ width: `${pct * 100}%`, height: 6, borderRadius: 4, background: CORES_PIE[Math.min(i, 5)] }} />
-                      </div>
-                      <span style={{ fontSize: 11, color: PALETTE.textoSec, width: 44, textAlign: "right" }}>{fmtPct(pct)}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div style={s.row}>
-          <div style={{ ...s.card, flex: 1.3, minWidth: 360 }}>
-            <div style={s.titulo}>Ranking das Categorias</div>
-            <div style={{ maxHeight: 430, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
-              <ResponsiveContainer width="100%" height={alturaTopCategorias}>
-                <BarChart data={topCategorias} layout="vertical" margin={{ top: 4, right: 30, bottom: 4, left: 12 }}>
-                  <CartesianGrid {...CHART_THEME.gridHorizontal} />
-                  <XAxis type="number" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                  <YAxis
-                    type="category"
-                    dataKey="nome"
-                    interval={0}
-                    tickFormatter={fmtNomeUnidade}
-                    {...CHART_THEME.axisCategory}
-                    width={150}
+            <p style={{ margin: "0 0 12px", fontSize: 12, color: PALETTE.textoSec, lineHeight: 1.45 }}>
+              Cada fatia mostra categoria, valor em R$ (completo) e % do total do gráfico ({fmt(pieTotalValor)}).
+            </p>
+            {pieData.length === 0 ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 360, color: PALETTE.textoSec, fontSize: 14 }}>
+                Sem dados de despesas por categoria.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={420}>
+                <PieChart margin={{ top: 28, right: 150, bottom: 28, left: 150 }}>
+                  <Pie
+                    data={pieData}
+                    dataKey="valor"
+                    nameKey="nome"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={0}
+                    outerRadius={138}
+                    paddingAngle={1}
+                    labelLine={false}
+                    label={renderPieCompositionDespesasLabel}
+                  >
+                    {pieData.map((_: any, i: number) => (
+                      <Cell key={i} fill={CORES_PIE[i % CORES_PIE.length]} stroke={PALETTE.fundo} strokeWidth={1} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(v: any, _n: string, item: any) => {
+                      const val = toNum(v);
+                      const pct = pieTotalValor > 0 ? val / pieTotalValor : 0;
+                      return [`${fmt(val)} (${(pct * 100).toFixed(2)}%)`, item?.payload?.nome ?? "Despesa"];
+                    }}
                   />
-                  {chartTooltip}
-                  <Bar dataKey="valor" name="Despesa" radius={CHART_THEME.barRadiusSide}>
-                    {topCategorias.map((item: any, i: number) => <Cell key={i} fill={item.cor} />)}
-                    <LabelList dataKey="valor" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.texto} />} />
-                  </Bar>
-                </BarChart>
+                </PieChart>
               </ResponsiveContainer>
-            </div>
+            )}
           </div>
 
-          <div style={{ ...s.card, flex: 0.9, minWidth: 300 }}>
-            <div style={s.titulo}>Leitura Rápida</div>
-            <div style={{ display: "grid", gap: 12 }}>
-              <div style={{ padding: "14px 16px", borderRadius: 12, background: `${PALETTE.vermelho}12`, border: `1px solid ${PALETTE.vermelho}33` }}>
-                <div style={{ fontSize: 11, color: PALETTE.textoSec, textTransform: "uppercase", letterSpacing: 0.8 }}>Maior Categoria</div>
-                <div style={{ fontSize: 16, fontWeight: 800, color: PALETTE.texto, marginTop: 6 }}>{maiorCategoria?.nome || "—"}</div>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 8 }}>
-                  <span style={{ color: PALETTE.vermelho, fontWeight: 700 }}>{maiorCategoria ? fmtK(maiorCategoria.valor) : "—"}</span>
-                  <span style={{ color: PALETTE.textoSec, fontWeight: 700 }}>{maiorCategoria && totalReceita > 0 ? fmtPct(maiorCategoria.valor / totalReceita) : "0.00%"}</span>
-                </div>
+          <div style={{ ...s.card, minHeight: 480 }}>
+            <div style={s.titulo}>Top 5 — maiores despesas</div>
+            <p style={{ margin: "0 0 14px", fontSize: 12, color: PALETTE.textoSec, lineHeight: 1.45 }}>
+              Cinco categorias com maior valor absoluto (antes de agrupar o restante em &apos;Outros&apos; no gráfico).
+            </p>
+            {top5CategoriasMaiores.length === 0 ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: PALETTE.textoSec, fontSize: 14 }}>
+                Sem categorias para listar.
               </div>
-
-              <div style={{ padding: "14px 16px", borderRadius: 12, background: `${PALETTE.laranja}12`, border: `1px solid ${PALETTE.laranja}33` }}>
-                <div style={{ fontSize: 11, color: PALETTE.textoSec, textTransform: "uppercase", letterSpacing: 0.8 }}>Concentração Top 3</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: PALETTE.laranja, marginTop: 6 }}>{fmtPct(totalDespesa > 0 ? top3Total / totalDespesa : 0)}</div>
-                <div style={{ color: PALETTE.textoSec, fontSize: 12, marginTop: 4 }}>{fmtK(top3Total)} nas 3 maiores categorias</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {top5CategoriasMaiores.map((c: any, i: number) => {
+                  const cor = CORES_PIE[i % CORES_PIE.length];
+                  const pctDoTotal = totalDespesa > 0 ? c.valor / totalDespesa : 0;
+                  return (
+                    <div
+                      key={c.nome}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 14,
+                        padding: "14px 16px",
+                        borderRadius: 12,
+                        background: `${cor}14`,
+                        border: `1px solid ${cor}40`,
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: PALETTE.textoSec, fontWeight: 700, letterSpacing: 0.6 }}>#{i + 1}</div>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: PALETTE.texto, marginTop: 4, lineHeight: 1.25 }}>{c.nome}</div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: cor, lineHeight: 1.3 }}>{fmt(c.valor)}</div>
+                        <div style={{ fontSize: 12, color: PALETTE.textoSec, marginTop: 4, fontWeight: 600 }}>
+                          {fmtPct(pctDoTotal)} do total de despesas
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-
-              <div style={{ padding: "14px 16px", borderRadius: 12, background: `${PALETTE.azul}12`, border: `1px solid ${PALETTE.azul}33` }}>
-                <div style={{ fontSize: 11, color: PALETTE.textoSec, textTransform: "uppercase", letterSpacing: 0.8 }}>Top 5 + Outros</div>
-                <div style={{ fontSize: 22, fontWeight: 800, color: PALETTE.azul, marginTop: 6 }}>{fmtPct(totalDespesa > 0 ? top5Total / totalDespesa : 0)}</div>
-                <div style={{ color: PALETTE.textoSec, fontSize: 12, marginTop: 4 }}>{fmtK(outros)} concentrados em "Outros"</div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
         <div style={s.card}>
           <div style={s.titulo}>Tabela Completa de Categorias</div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: "760px" }}>
-              <thead>
-                <tr>
-                  {["#", "Categoria", "Valor", "% sobre Faturamento", "Acumulado"].map(h => (
-                    <th key={h} style={{ color: PALETTE.textoSec, fontWeight: 700, padding: "8px 12px", textAlign: "left", borderBottom: `1px solid ${PALETTE.borda}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rankingDespesas.map((c: any, i: number) => {
-                  const pct = totalReceita > 0 ? c.valor / totalReceita : 0;
-                  acumuladoDespesas += c.valor;
-                  const acumulado = totalReceita > 0 ? acumuladoDespesas / totalReceita : 0;
-                  return (
-                    <tr key={i} style={{ borderBottom: `1px solid ${PALETTE.borda}20` }}>
-                      <td style={{ padding: "10px 12px", color: PALETTE.textoSec }}>{i + 1}</td>
-                      <td style={{ padding: "10px 12px", fontWeight: 600 }}>{c.nome}</td>
-                      <td style={{ padding: "10px 12px", color: PALETTE.vermelho, fontWeight: 700 }}>{fmtK(c.valor)}</td>
-                      <td style={{ padding: "10px 12px" }}>{fmtPct(pct)}</td>
-                      <td style={{ padding: "10px 12px" }}>{fmtPct(acumulado)}</td>
+          <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 14 }}>
+            Despesa por categoria em cada mês do período filtrado; percentual = total da categoria ÷ receita total
+            consolidada no período.
+          </div>
+          {comparativoMensalCategoriasRows.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, color: PALETTE.textoSec, fontSize: 14 }}>
+              Não há histórico mensal por categoria para o filtro aplicado.
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 520 }}>
+                <thead>
+                  <tr>
+                    <th
+                      style={{
+                        color: PALETTE.textoSec,
+                        fontWeight: 700,
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        borderBottom: `1px solid ${PALETTE.borda}`,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.8,
+                      }}
+                    >
+                      Categoria
+                    </th>
+                    {monthMetaListCustos.map(({ mesLabel }) => (
+                      <th
+                        key={mesLabel}
+                        style={{
+                          color: PALETTE.textoSec,
+                          fontWeight: 700,
+                          padding: "10px 12px",
+                          textAlign: "right",
+                          borderBottom: `1px solid ${PALETTE.borda}`,
+                          fontSize: 11,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.8,
+                        }}
+                      >
+                        {mesLabel}
+                      </th>
+                    ))}
+                    <th
+                      style={{
+                        color: PALETTE.textoSec,
+                        fontWeight: 700,
+                        padding: "10px 12px",
+                        textAlign: "right",
+                        borderBottom: `1px solid ${PALETTE.borda}`,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.8,
+                      }}
+                    >
+                      Resultado
+                    </th>
+                    <th
+                      style={{
+                        color: PALETTE.textoSec,
+                        fontWeight: 700,
+                        padding: "10px 12px",
+                        textAlign: "right",
+                        borderBottom: `1px solid ${PALETTE.borda}`,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.8,
+                      }}
+                    >
+                      Percentual
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparativoMensalCategoriasRows.map((row) => (
+                    <tr key={row.nome} style={{ borderBottom: `1px solid ${PALETTE.borda}33` }}>
+                      <td style={{ padding: "10px 12px", fontWeight: 600, color: PALETTE.texto }}>{row.nome}</td>
+                      {monthMetaListCustos.map(({ mesLabel }) => {
+                        const v = row.cellByLabel[mesLabel] ?? 0;
+                        return (
+                          <td
+                            key={`${row.nome}-${mesLabel}`}
+                            style={{
+                              padding: "10px 12px",
+                              textAlign: "right",
+                              color: v < 0 ? PALETTE.vermelho : PALETTE.texto,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {fmt(toNum(v))}
+                          </td>
+                        );
+                      })}
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "right",
+                          color: row.resultado < 0 ? PALETTE.vermelho : PALETTE.texto,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {fmt(toNum(row.resultado))}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "right",
+                          color: row.percentual < 0 ? PALETTE.vermelho : PALETTE.texto,
+                          fontWeight: 700,
+                        }}
+                      >
+                        {(row.percentual * 100).toFixed(2)}%
+                      </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div style={s.card}>
-          <div style={s.titulo}>Custos de Eventos por Categoria</div>
-          <p style={{fontSize: 12, color: PALETTE.textoSec, marginBottom: 8}}>*Mock apenas para visualização deste modelo</p>
-          <div style={{ maxHeight: 420, overflowY: "auto", overflowX: "hidden", paddingRight: 4 }}>
-            <ResponsiveContainer width="100%" height={Math.max(categoriasEventos.length * 26, 240)}>
-            <BarChart data={categoriasEventos} layout="vertical" margin={{ top: 4, right: 18, bottom: 4, left: 12 }}>
-              <CartesianGrid {...CHART_THEME.gridHorizontal} />
-              <XAxis type="number" tickFormatter={v => `R$${(v/1000).toFixed(0)}K`} {...CHART_THEME.axisY} />
-              <YAxis dataKey="nome" type="category" interval={0} tickFormatter={fmtNomeUnidade} {...CHART_THEME.axisCategory} width={160} />
-              {chartTooltip}
-              <Bar dataKey="valor" name="Valor" fill={PALETTE.roxo} radius={CHART_THEME.barRadiusSide}>
-                <LabelList dataKey="valor" content={<LabelBarRightValue formatter={fmtCompactMoney} color={PALETTE.roxo} />} />
-              </Bar>
-            </BarChart>
-            </ResponsiveContainer>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </>
     );
   };
-  // â”€â”€ ABA 3: TENDÃŠNCIA / ACUMULADOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const AbaTendencia = () => (
-    <>
-      {renderMonthFilter('tendencia', getMonthOptionsFromSeries(mesesFull))}
-      <div style={s.row}>
-        <KpiCard titulo="Receita Acumulada" valor={fmtK(acumulados.length ? acumulados[acumulados.length-1].recAcum : 0)} sub="Total Periodo" cor={PALETTE.verde} icon="+" />
-        <KpiCard titulo="Despesa Acumulada" valor={fmtK(acumulados.length ? acumulados[acumulados.length-1].despAcum : 0)} sub="Total Periodo" cor={PALETTE.vermelho} icon="-" />
-        <KpiCard titulo="Lucro Acumulado" valor={fmtK(acumulados.length ? acumulados[acumulados.length-1].lucroAcum : 0)} sub="Total Periodo" cor={totalLucro >= 0 ? PALETTE.verde : PALETTE.vermelho} icon="=" />
-        <KpiCard titulo="Media Rec. Mensal" valor={fmtK(meses.length ? totalReceita / meses.length : 0)} sub="por mes" cor={PALETTE.azul} icon="M" />
-      </div>
-
-      <div style={s.card}>
-        <div style={s.titulo}>Acumulado Mensal - Receita, Despesa e Lucro</div>
-        <ResponsiveContainer width="100%" height={320}>
-          <ComposedChart data={acumulados}>
-            <CartesianGrid {...CHART_THEME.grid} />
-            <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
-            <YAxis tickFormatter={v => `R$${(v/1000).toFixed(0)}K`} {...CHART_THEME.axisY} />
-            {chartTooltip}
-            <Legend wrapperStyle={CHART_THEME.legend} />
-            <Bar dataKey="recAcum" name="Rec. Acum." fill={PALETTE.verde} radius={CHART_THEME.barRadiusTop}>
-              <LabelList dataKey="recAcum" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.verde} />} />
-            </Bar>
-            <Bar dataKey="despAcum" name="Desp. Acum." fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusTop}>
-              <LabelList dataKey="despAcum" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
-            </Bar>
-            <Line type="monotone" dataKey="lucroAcum" name="Lucro Acum." stroke={PALETTE.azul} {...CHART_THEME.line} dot={{ ...CHART_THEME.line.dot, fill: PALETTE.azul, r: 6 }} activeDot={{ ...CHART_THEME.line.activeDot, r: 8 }} />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div style={{ ...s.card, marginTop: 16 }}>
-        <div style={s.titulo}>Evolucao da Margem % por Mes</div>
-        <ResponsiveContainer width="100%" height={260}>
-          <ComposedChart data={margemMensalSeries}>
-            <CartesianGrid {...CHART_THEME.grid} />
-            <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
-            <YAxis domain={getPercentDomain(margemMensalSeries, 'margem')} tickFormatter={v => `${(v*100).toFixed(0)}%`} {...CHART_THEME.axisY} />
-            {chartTooltip}
-            <Bar dataKey="margem" name="Margem %" fill={PALETTE.azul} radius={CHART_THEME.barRadiusTop}>
-              <LabelList dataKey="margem" content={<LabelBarTopValue formatter={fmtPctCompact} color={PALETTE.azul} />} />
-            </Bar>
-            <Line type="monotone" dataKey="margem" name="Margem %" stroke={PALETTE.laranja} {...CHART_THEME.line} dot={{ ...CHART_THEME.line.dot, fill: PALETTE.laranja, r: 6 }} activeDot={{ ...CHART_THEME.line.activeDot, r: 8 }} />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-    </>
-  );
-
-  // â”€â”€ ABA 4: PESSOAS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // â”€â”€ ABA: PESSOAS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const AbaPessoas = () => {
-    const dataRecFunc = unidades.map((u:any) => ({...u, fopagPorFunc: u.func > 0 ? u.fopag / u.func : 0}));
     const headcountMensalSeries = meses
       .map((item: any) => ({
         mes: item.mes,
@@ -1978,13 +2139,6 @@ function DashboardContent() {
     return (
     <>
       {renderMonthFilter('pessoas', getMonthOptionsFromSeries(mesesFull))}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 16, marginBottom: 16 }}>
-        <KpiCard titulo="RECEITA TOTAL" valor={fmtK(totalReceita)} sub="Base para analise de folha" cor={PALETTE.verde} icon="$" />
-        <KpiCard titulo="FOPAG" valor={fmtK(totalFopag)} sub="Proventos + Encargos Folha" cor={PALETTE.laranja} icon="F" />
-        <KpiCard titulo="FOPAG/Funcionário" valor={fmtK(totalFunc > 0 ? totalFopag / totalFunc : 0)} cor={PALETTE.roxo} icon="MF" />
-        <KpiCard titulo="FOPAG %" valor={fmtPct(totalReceita > 0 ? totalFopag / totalReceita : 0)} sub="FOPAG dividido pela receita" cor={PALETTE.vermelho} icon="CF" />
-        <KpiCard titulo="TOTAL FUNCIONÁRIOS" valor={totalFunc} cor={PALETTE.azul} icon="P" />
-      </div>
 
       <div style={s.card}>
         <div style={s.titulo}>EVOLUTIVO MENSAL DO FOPAG</div>
@@ -2033,54 +2187,6 @@ function DashboardContent() {
       </div>
 
       <div style={s.card}>
-        <div style={s.titulo}>HEADCOUNT POR UNIDADE</div>
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={unidades}>
-            <CartesianGrid {...CHART_THEME.gridVertical} />
-            <XAxis dataKey="nome" {...CHART_THEME.axisY} />
-            <YAxis {...CHART_THEME.axisY} />
-            {chartTooltip}
-            <Bar dataKey="func" name="Funcionários" radius={CHART_THEME.barRadiusTop}>
-              {unidades.map((_: any, i: number) => <Cell key={i} fill={CORES_UNIDADES[i % CORES_UNIDADES.length]} />)}
-              <LabelList dataKey="func" content={<LabelBarTopValue formatter={(v: number) => `${Math.round(v)}`} color={PALETTE.texto} />} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div style={s.card}>
-        <div style={s.titulo}>FOPAG POR UNIDADE</div>
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={unidades}>
-            <CartesianGrid {...CHART_THEME.gridVertical} />
-            <XAxis dataKey="nome" {...CHART_THEME.axisY} />
-            <YAxis tickFormatter={v => `R$${(v/1000).toFixed(0)}K`} {...CHART_THEME.axisY} />
-            {chartTooltip}
-            <Bar dataKey="fopag" name="FOPAG" radius={CHART_THEME.barRadiusTop}>
-              {unidades.map((_: any, i: number) => <Cell key={i} fill={CORES_UNIDADES[i % CORES_UNIDADES.length]} />)}
-              <LabelList dataKey="fopag" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.texto} />} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div style={s.card}>
-        <div style={s.titulo}>FOPAG POR FUNCIONÁRIO</div>
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={dataRecFunc}>
-            <CartesianGrid {...CHART_THEME.gridVertical} />
-            <XAxis dataKey="nome" {...CHART_THEME.axisY} />
-            <YAxis tickFormatter={v => `R$${(v/1000).toFixed(0)}K`} {...CHART_THEME.axisY} />
-            {chartTooltip}
-            <Bar dataKey="fopagPorFunc" name="FOPAG/Funcionário" radius={CHART_THEME.barRadiusTop}>
-              {unidades.map((_: any, i: number) => <Cell key={i} fill={CORES_UNIDADES[i % CORES_UNIDADES.length]} />)}
-              <LabelList dataKey="fopagPorFunc" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.texto} />} />
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div style={s.card}>
         <div style={s.titulo}>TABELA DE PESSOAS</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: "600px" }}>
@@ -2112,7 +2218,7 @@ function DashboardContent() {
 
   const AbaEvolutivos = () => {
     const monthOptions = getMonthOptionsFromSeries(buildMonthlySeries(unidadesFull));
-    const monthFilterEvolutivos = monthFilters.evolutivos || '';
+    const monthFilterPorUnidade = monthFilters.porUnidade || '';
     const possuiFiltroEvolutivo = filtroEvolutivoUnidade !== "Todas" && !!filtroEvolutivoUnidade;
     const unidadeEvolutiva = possuiFiltroEvolutivo
       ? unidades.find((u: any) => u.nome === filtroEvolutivoUnidade) || null
@@ -2129,15 +2235,6 @@ function DashboardContent() {
     const despesasEvolutivas = possuiFiltroEvolutivo
       ? unidadeEvolutiva?.expenseDefinitions || []
       : mergeExpenseDefinitions(unidades);
-    const comparativoResultado = unidades
-      .map((u: any) => ({
-        nome: u.nome,
-        receita: toNum(u.receita),
-        despesa: toNum(u.despesa),
-        resultado: toNum(u.lucro),
-        margem: toNum(u.margem),
-      }))
-      .sort((a: any, b: any) => b.resultado - a.resultado);
     const comparativoResultadoFiltrado = unidadesEvolutivasAtual
       .map((u: any) => ({
         nome: u.nome,
@@ -2147,57 +2244,78 @@ function DashboardContent() {
         margem: toNum(u.margem),
       }))
       .sort((a: any, b: any) => b.resultado - a.resultado);
-    const unidadesEvolutivasSeries = unidadesEvolutivasCompletas
-      .map((u: any) => ({
-        nome: u.nome,
-        categorias: (u.expenseDefinitionsMonthly || []).map((item: any) => ({
-          nome: item.nome,
-          ...Object.fromEntries(
-            (item.monthly || [])
-              .filter((entry: any) => !monthFilterEvolutivos || entry.mes === monthFilterEvolutivos)
-              .map((entry: any) => [entry.mesLabel || entry.mes, toNum(entry.valor)]),
-          ),
-        })),
-        meses: Array.from(
-          new Set(
-            (u.expenseDefinitionsMonthly || []).flatMap((item: any) =>
-              (item.monthly || [])
-                .filter((entry: any) => !monthFilterEvolutivos || entry.mes === monthFilterEvolutivos)
-                .map((entry: any) => String(entry.mesLabel || entry.mes)),
-            ),
-          ),
-        ),
-      }))
-      .map((u: any) => ({
-        ...u,
-        categorias: (u.categorias || []).filter((categoria: any) =>
-          (u.meses || []).some((mes: string) => toNum(categoria[mes]) !== 0),
-        ),
-      }))
-      .filter((u: any) => (u.categorias || []).length > 0 && (u.meses || []).length > 0);
+
+    const unitsEvolutivosChart = ordenarUnidadesParaExibicao(
+      unidadesEvolutivasCompletas.filter((u: any) => !ehUnidadeTotal(String(u.nome || ''))),
+    );
+    const monthMetaListEvolutivos = (() => {
+      const map = new Map<string, { mes: string; mesLabel: string }>();
+      for (const u of unitsEvolutivosChart) {
+        for (const entry of u.monthly || []) {
+          if (monthFilterPorUnidade && String(entry.mes) !== monthFilterPorUnidade) continue;
+          const mes = String(entry.mes || '');
+          if (!mes) continue;
+          const mesLabel = String(entry.mesLabel || mes);
+          if (!map.has(mes)) map.set(mes, { mes, mesLabel });
+        }
+      }
+      return Array.from(map.values()).sort((a, b) => a.mes.localeCompare(b.mes));
+    })();
+    const despesaLineDataEvolutivos = monthMetaListEvolutivos.map(({ mes, mesLabel }) => {
+      const row: Record<string, string | number> = { mesLabel };
+      for (const u of unitsEvolutivosChart) {
+        const m = (u.monthly || []).find((x: any) => String(x.mes) === mes);
+        row[u.nome] = m ? toNum(m.despesa) : 0;
+      }
+      return row;
+    });
+    const comparativoMensalUnidadesRows = unitsEvolutivosChart.map((u: any) => {
+      const cellByLabel: Record<string, number> = {};
+      let sumLucro = 0;
+      let sumReceita = 0;
+      for (const { mes, mesLabel } of monthMetaListEvolutivos) {
+        const m = (u.monthly || []).find((x: any) => String(x.mes) === mes);
+        const luc = m ? toNum(m.lucro) : 0;
+        const rec = m ? toNum(m.receita) : 0;
+        cellByLabel[mesLabel] = luc;
+        sumLucro += luc;
+        sumReceita += rec;
+      }
+      const percentual = sumReceita !== 0 ? sumLucro / sumReceita : 0;
+      return { nome: u.nome, cellByLabel, resultado: sumLucro, percentual };
+    });
+
     const unidadesComparativoMensalDespesas = unidadesEvolutivasCompletas
+      .filter((u: any) => !ehUnidadeTotal(String(u.nome || '')))
       .map((u: any) => {
         const categorias = (u.expenseDefinitionsMonthly || [])
           .map((item: any) => ({
             nome: item.nome,
-            monthly: (item.monthly || []).filter((entry: any) => !monthFilterEvolutivos || entry.mes === monthFilterEvolutivos),
+            monthly: (item.monthly || []).filter(
+              (entry: any) => !monthFilterPorUnidade || entry.mes === monthFilterPorUnidade,
+            ),
             total: (item.monthly || [])
-              .filter((entry: any) => !monthFilterEvolutivos || entry.mes === monthFilterEvolutivos)
+              .filter((entry: any) => !monthFilterPorUnidade || entry.mes === monthFilterPorUnidade)
               .reduce((acc: number, entry: any) => acc + toNum(entry.valor), 0),
           }))
           .filter((item: any) => item.monthly.length > 0 && item.total > 0)
           .sort((a: any, b: any) => b.total - a.total);
 
-        const meses = Array.from<string>(
-          new Set<string>(
-            categorias.flatMap((item: any) =>
-              item.monthly.map((entry: any) => String(entry.mesLabel || entry.mes)),
-            ),
-          ),
-        );
+        const mesPorOrdem = new Map<string, string>();
+        for (const cat of categorias) {
+          for (const entry of cat.monthly || []) {
+            const mes = String(entry.mes || "");
+            if (!mes) continue;
+            mesPorOrdem.set(mes, String(entry.mesLabel || entry.mes));
+          }
+        }
+        const meses = Array.from(mesPorOrdem.entries())
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([, mesLabel]) => mesLabel);
+
         const receitaByMesLabel = new Map(
           (u.monthly || [])
-            .filter((entry: any) => !monthFilterEvolutivos || entry.mes === monthFilterEvolutivos)
+            .filter((entry: any) => !monthFilterPorUnidade || entry.mes === monthFilterPorUnidade)
             .map((entry: any) => [String(entry.mesLabel || entry.mes), toNum(entry.receita)]),
         );
 
@@ -2206,7 +2324,9 @@ function DashboardContent() {
           receita: receitaByMesLabel.get(mesLabel) ?? 0,
           ...Object.fromEntries(
             categorias.map((categoria: any) => {
-              const monthEntry = categoria.monthly.find((entry: any) => String(entry.mesLabel || entry.mes) === mesLabel);
+              const monthEntry = categoria.monthly.find(
+                (entry: any) => String(entry.mesLabel || entry.mes) === mesLabel,
+              );
               return [categoria.nome, toNum(monthEntry?.valor)];
             }),
           ),
@@ -2219,12 +2339,10 @@ function DashboardContent() {
         };
       })
       .filter((u: any) => u.categorias.length > 0 && u.monthlyRows.length > 0);
-    const alturaComparativo = Math.max(comparativoResultadoFiltrado.length * 42, 320);
-    const alturaDespesasEvolutivas = Math.max(despesasEvolutivas.length * 34, 240);
 
     return (
     <>
-      {renderMonthFilter('evolutivos', monthOptions)}
+      {renderMonthFilter('porUnidade', monthOptions)}
 
       <div style={{ marginBottom: 10, fontSize: 11, color: PALETTE.textoSec, textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 700 }}>
         Unidade
@@ -2249,74 +2367,129 @@ function DashboardContent() {
       </div>
 
       <div style={s.card}>
-        <div style={s.titulo}>COMPARATIVO DAS UNIDADES</div>
-        <div style={{ overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
-          <div style={{ minWidth: Math.max(comparativoResultadoFiltrado.length * 140, 720) }}>
-          <ResponsiveContainer width="100%" height={alturaComparativo}>
-            <BarChart data={comparativoResultadoFiltrado} barGap={10} margin={{ top: 12, right: 24, bottom: 12, left: 12 }}>
-              <CartesianGrid {...CHART_THEME.gridVertical} />
-              <XAxis dataKey="nome" tickFormatter={fmtNomeUnidade} {...CHART_THEME.axisX} />
-              <YAxis tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-              {chartTooltip}
-              <Legend wrapperStyle={CHART_THEME.legend} />
-              <Bar dataKey="receita" name="Receita" fill={PALETTE.azul} radius={CHART_THEME.barRadiusTop}>
-                <LabelList dataKey="receita" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.azul} />} />
-              </Bar>
-              <Bar dataKey="despesa" name="Despesa" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusTop}>
-                <LabelList dataKey="despesa" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
-              </Bar>
-              <Bar dataKey="resultado" name="Resultado" radius={CHART_THEME.barRadiusTop}>
-                {comparativoResultadoFiltrado.map((item: any) => <Cell key={item.nome} fill={item.resultado >= 0 ? PALETTE.verde : PALETTE.vermelho} />)}
-                <LabelList dataKey="resultado" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.texto} />} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-          </div>
+        <div style={s.titulo}>EVOLUÇÃO MENSAL DAS UNIDADES</div>
+        <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 14 }}>
+          Despesa total mensal por unidade para o filtro selecionado
         </div>
+        {despesaLineDataEvolutivos.length === 0 ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: PALETTE.textoSec, fontSize: 14 }}>
+            Não há histórico mensal de despesas para o filtro aplicado.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={420}>
+            <LineChart data={despesaLineDataEvolutivos} margin={{ top: 12, right: 20, bottom: 8, left: 4 }}>
+              <CartesianGrid {...CHART_THEME.gridVertical} />
+              <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
+              <YAxis tickFormatter={fmtAxisMoney} domain={getMoneyDomain(despesaLineDataEvolutivos, unitsEvolutivosChart.map((u: any) => u.nome))} {...CHART_THEME.axisY} />
+              {chartTooltip}
+              <Legend wrapperStyle={{ ...CHART_THEME.legend, fontSize: 11 }} />
+              {unitsEvolutivosChart.map((u: any, i: number) => (
+                <Line
+                  key={u.nome}
+                  type="monotone"
+                  dataKey={u.nome}
+                  name={u.nome}
+                  stroke={CORES_UNIDADES[i % CORES_UNIDADES.length]}
+                  strokeWidth={2}
+                  dot={{ r: 4, fill: CORES_UNIDADES[i % CORES_UNIDADES.length] }}
+                  activeDot={{ r: 6 }}
+                  connectNulls
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </div>
 
       <div style={s.card}>
-        <div style={s.titulo}>{possuiFiltroEvolutivo ? `DESPESAS DA UNIDADE ${filtroEvolutivoUnidade.toUpperCase()}` : "DESPESAS AGRUPADAS DAS UNIDADES"}</div>
-        {despesasEvolutivas.length === 0 ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: PALETTE.textoSec, fontSize: 14 }}>
-            Nao ha despesas por definicao para o filtro aplicado.
+        <div style={s.titulo}>COMPARATIVO MENSAL DAS UNIDADES</div>
+        <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 14 }}>
+          Resultado (lucro) por mês no período filtrado; percentual = resultado ÷ receita no período.
+        </div>
+        {comparativoMensalUnidadesRows.length === 0 ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, color: PALETTE.textoSec, fontSize: 14 }}>
+            Não há linhas para exibir.
           </div>
         ) : (
-          <div style={{ overflowX: "auto", overflowY: "hidden", paddingBottom: 4 }}>
-            <div style={{ minWidth: Math.max(despesasEvolutivas.length * 120, 720) }}>
-            <ResponsiveContainer width="100%" height={alturaDespesasEvolutivas}>
-              <BarChart data={despesasEvolutivas} barGap={10} margin={{ top: 12, right: 24, bottom: 12, left: 12 }}>
-                <CartesianGrid {...CHART_THEME.gridVertical} />
-                <XAxis dataKey="nome" tickFormatter={fmtNomeUnidade} {...CHART_THEME.axisX} />
-                <YAxis tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                {chartTooltip}
-                <Bar dataKey="valor" name="Despesa" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusTop}>
-                  <LabelList dataKey="valor" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 520 }}>
+              <thead>
+                <tr>
+                  <th style={{ color: PALETTE.textoSec, fontWeight: 700, padding: "10px 12px", textAlign: "left", borderBottom: `1px solid ${PALETTE.borda}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8 }}>Unidade</th>
+                  {monthMetaListEvolutivos.map(({ mesLabel }) => (
+                    <th key={mesLabel} style={{ color: PALETTE.textoSec, fontWeight: 700, padding: "10px 12px", textAlign: "right", borderBottom: `1px solid ${PALETTE.borda}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8 }}>{mesLabel}</th>
+                  ))}
+                  <th style={{ color: PALETTE.textoSec, fontWeight: 700, padding: "10px 12px", textAlign: "right", borderBottom: `1px solid ${PALETTE.borda}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8 }}>Resultado</th>
+                  <th style={{ color: PALETTE.textoSec, fontWeight: 700, padding: "10px 12px", textAlign: "right", borderBottom: `1px solid ${PALETTE.borda}`, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8 }}>Percentual</th>
+                </tr>
+              </thead>
+              <tbody>
+                {comparativoMensalUnidadesRows.map((row) => (
+                  <tr key={row.nome} style={{ borderBottom: `1px solid ${PALETTE.borda}33` }}>
+                    <td style={{ padding: "10px 12px", fontWeight: 600, color: PALETTE.texto }}>{row.nome}</td>
+                    {monthMetaListEvolutivos.map(({ mesLabel }) => {
+                      const v = row.cellByLabel[mesLabel] ?? 0;
+                      return (
+                        <td key={`${row.nome}-${mesLabel}`} style={{ padding: "10px 12px", textAlign: "right", color: v < 0 ? PALETTE.vermelho : PALETTE.texto, fontWeight: 600 }}>
+                          {fmt(toNum(v))}
+                        </td>
+                      );
+                    })}
+                    <td style={{ padding: "10px 12px", textAlign: "right", color: row.resultado < 0 ? PALETTE.vermelho : PALETTE.texto, fontWeight: 700 }}>
+                      {fmt(toNum(row.resultado))}
+                    </td>
+                    <td style={{ padding: "10px 12px", textAlign: "right", color: row.percentual < 0 ? PALETTE.vermelho : PALETTE.texto, fontWeight: 700 }}>
+                      {(row.percentual * 100).toFixed(2)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
 
       <div style={s.card}>
-        <div style={s.titulo}>DESPESAS DA UNIDADE POR MES</div>
+        <div style={s.titulo}>DESPESAS DA UNIDADE POR MÊS</div>
         <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 14 }}>
-          Cada unidade compara suas categorias de despesa ao longo dos meses disponiveis.
+          Cada unidade compara suas categorias de despesa ao longo dos meses disponíveis.
         </div>
         {unidadesComparativoMensalDespesas.length === 0 ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 220, color: PALETTE.textoSec, fontSize: 14 }}>
-            Nao ha historico mensal de despesas para o filtro aplicado.
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: 220,
+              color: PALETTE.textoSec,
+              fontSize: 14,
+            }}
+          >
+            Não há histórico mensal de despesas por categoria para o filtro aplicado.
           </div>
         ) : (
           <div style={{ display: "grid", gap: 18 }}>
             {unidadesComparativoMensalDespesas.map((unit: any) => (
               <div key={`${unit.nome}-mensal`} style={{ borderTop: `1px solid ${PALETTE.borda}`, paddingTop: 18 }}>
-                <div style={{ color: PALETTE.texto, fontSize: 18, fontWeight: 800, letterSpacing: -0.2, marginBottom: 12 }}>
+                <div
+                  style={{
+                    color: PALETTE.texto,
+                    fontSize: 18,
+                    fontWeight: 800,
+                    letterSpacing: -0.2,
+                    marginBottom: 12,
+                  }}
+                >
                   {unit.nome}
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 14 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 12,
+                    marginBottom: 14,
+                  }}
+                >
                   {unit.monthlyRows.map((row: any) => {
                     const entries = unit.categorias
                       .map((categoria: string) => ({
@@ -2340,12 +2513,36 @@ function DashboardContent() {
                           padding: "12px 14px",
                         }}
                       >
-                        <div style={{ color: PALETTE.textoSec, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, fontWeight: 700, marginBottom: 6 }}>
+                        <div
+                          style={{
+                            color: PALETTE.textoSec,
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.8,
+                            fontWeight: 700,
+                            marginBottom: 6,
+                          }}
+                        >
                           {row.mesLabel}
                         </div>
-                        <div style={{ color: PALETTE.texto, fontSize: 22, fontWeight: 800, letterSpacing: -0.4, marginBottom: 6 }}>
+                        <div
+                          style={{
+                            color: PALETTE.texto,
+                            fontSize: 22,
+                            fontWeight: 800,
+                            letterSpacing: -0.4,
+                            marginBottom: 6,
+                          }}
+                        >
                           {fmtK(totalMes)}
-                          <span style={{ color: PALETTE.textoSec, fontSize: 12, fontWeight: 700, marginLeft: 8 }}>
+                          <span
+                            style={{
+                              color: PALETTE.textoSec,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              marginLeft: 8,
+                            }}
+                          >
                             {fmtPct(totalMesPct)}
                           </span>
                         </div>
@@ -2355,7 +2552,9 @@ function DashboardContent() {
                         {principal ? (
                           <div style={{ color: PALETTE.texto, fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
                             {fmtK(principal.valor)}
-                            <span style={{ color: PALETTE.textoSec, marginLeft: 8 }}>{fmtPct(principal.pctFaturamento)}</span>
+                            <span style={{ color: PALETTE.textoSec, marginLeft: 8 }}>
+                              {fmtPct(principal.pctFaturamento)}
+                            </span>
                           </div>
                         ) : null}
                         {entries.length > 0 ? (
@@ -2363,12 +2562,19 @@ function DashboardContent() {
                             {entries.map((item: any) => (
                               <div
                                 key={`${unit.nome}-${row.mesLabel}-${item.categoria}`}
-                                style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  gap: 10,
+                                  fontSize: 12,
+                                }}
                               >
                                 <span style={{ color: PALETTE.textoSec }}>{item.categoria}</span>
                                 <span style={{ color: PALETTE.texto, fontWeight: 700, whiteSpace: "nowrap" }}>
                                   {fmtK(item.valor)}
-                                  <span style={{ color: PALETTE.textoSec, marginLeft: 8 }}>{fmtPct(item.pctFaturamento)}</span>
+                                  <span style={{ color: PALETTE.textoSec, marginLeft: 8 }}>
+                                    {fmtPct(item.pctFaturamento)}
+                                  </span>
                                 </span>
                               </div>
                             ))}
@@ -2379,25 +2585,36 @@ function DashboardContent() {
                   })}
                 </div>
                 <div style={{ width: "100%", minWidth: 0 }}>
-                    <ResponsiveContainer width="100%" height={380}>
-                      <BarChart data={unit.monthlyRows} barCategoryGap="10%" barGap={3} margin={{ top: 18, right: 18, bottom: 44, left: 0 }}>
-                        <CartesianGrid {...CHART_THEME.gridVertical} />
-                        <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
-                        <YAxis tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                        {chartTooltip}
-                        <Legend wrapperStyle={{ ...CHART_THEME.legend, fontSize: 11, paddingTop: 18 }} />
-                        {unit.categorias.map((categoria: string, index: number) => (
-                          <Bar
-                            key={`${unit.nome}-${categoria}`}
-                            dataKey={categoria}
-                            name={categoria}
-                            fill={[PALETTE.vermelho, PALETTE.laranja, PALETTE.azul, PALETTE.roxo, PALETTE.rosa, PALETTE.cinza, PALETTE.verde][index % 7]}
-                            radius={CHART_THEME.barRadiusTop}
-                            maxBarSize={24}
-                          />
-                        ))}
-                      </BarChart>
-                    </ResponsiveContainer>
+                  <ResponsiveContainer width="100%" height={380}>
+                    <BarChart
+                      data={unit.monthlyRows}
+                      barCategoryGap="10%"
+                      barGap={3}
+                      margin={{ top: 18, right: 18, bottom: 44, left: 0 }}
+                    >
+                      <CartesianGrid {...CHART_THEME.gridVertical} />
+                      <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
+                      <YAxis tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
+                      {chartTooltip}
+                      <Legend
+                        wrapperStyle={{ ...CHART_THEME.legend, fontSize: 11, paddingTop: 18 }}
+                      />
+                      {unit.categorias.map((categoria: string, index: number) => (
+                        <Bar
+                          key={`${unit.nome}-${categoria}`}
+                          dataKey={categoria}
+                          name={categoria}
+                          fill={
+                            [PALETTE.vermelho, PALETTE.laranja, PALETTE.azul, PALETTE.roxo, PALETTE.rosa, PALETTE.cinza, PALETTE.verde][
+                              index % 7
+                            ]
+                          }
+                          radius={CHART_THEME.barRadiusTop}
+                          maxBarSize={24}
+                        />
+                      ))}
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             ))}
@@ -2408,7 +2625,7 @@ function DashboardContent() {
     );
   };
 
-  const abas = [AbaVisaoGeral, AbaPorUnidade, AbaPorGestoras, AbaCustos, AbaTendencia, AbaPessoas, AbaEvolutivos];
+  const abas = [AbaVisaoGeral, AbaPorGestoras, AbaCustos, AbaPessoas, AbaEvolutivos];
   const AbaAtual = abas[aba];
 
   return (
@@ -2452,6 +2669,238 @@ function DashboardContent() {
         )}
         <AbaAtual />
       </div>
+
+      {importModal.open ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="import-modal-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 24,
+            background: "rgba(10, 18, 32, 0.82)",
+            backdropFilter: "blur(12px)",
+          }}
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (importModal.phase === "success" || importModal.phase === "error") closeImportModal();
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              borderRadius: 22,
+              padding: "28px 26px 22px",
+              background: `linear-gradient(160deg, ${PALETTE.card} 0%, #0f1829 55%, #0c1524 100%)`,
+              border: `1px solid ${PALETTE.borda}`,
+              boxShadow: "0 28px 90px rgba(0,0,0,0.5), 0 0 0 1px rgba(76,141,255,0.14)",
+            }}
+          >
+            <div
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: 14,
+                background: "rgba(76,141,255,0.12)",
+                border: `1px solid rgba(76,141,255,0.35)`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 18,
+              }}
+            >
+              <FileSpreadsheet size={26} color={PALETTE.azul} strokeWidth={1.75} />
+            </div>
+
+            <h2
+              id="import-modal-title"
+              style={{
+                margin: 0,
+                fontSize: 20,
+                fontWeight: 800,
+                letterSpacing: -0.4,
+                color: PALETTE.texto,
+              }}
+            >
+              {importModal.phase === "uploading"
+                ? "Enviando planilha"
+                : importModal.phase === "refreshing"
+                  ? "Atualizando dashboard"
+                  : importModal.phase === "success"
+                    ? "Importação concluída"
+                    : "Não foi possível importar"}
+            </h2>
+
+            {importModal.fileName ? (
+              <p style={{ margin: "10px 0 0", fontSize: 13, color: PALETTE.textoSec, lineHeight: 1.45 }}>
+                <span style={{ color: PALETTE.texto, fontWeight: 600 }}>{importModal.fileName}</span>
+              </p>
+            ) : null}
+
+            {(importModal.phase === "uploading" || importModal.phase === "refreshing") && (
+              <>
+                <p style={{ margin: "14px 0 0", fontSize: 13, color: PALETTE.textoSec }}>
+                  {importModal.phase === "uploading"
+                    ? "Processando arquivo no servidor…"
+                    : "Recarregando gráficos e tabelas com os novos dados…"}
+                </p>
+                <div
+                  style={{
+                    marginTop: 22,
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <Loader2
+                    className="animate-spin"
+                    size={36}
+                    color={PALETTE.azul}
+                    strokeWidth={2}
+                    aria-hidden
+                  />
+                </div>
+                <div
+                  style={{
+                    marginTop: 22,
+                    height: 4,
+                    borderRadius: 999,
+                    background: PALETTE.cinzaClaro,
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    className="pdca-import-bar-sweep"
+                    style={{
+                      width: "42%",
+                      height: "100%",
+                      borderRadius: 999,
+                      background: `linear-gradient(90deg, transparent, ${PALETTE.azul}, transparent)`,
+                    }}
+                  />
+                </div>
+              </>
+            )}
+
+            {importModal.phase === "success" && (
+              <div style={{ marginTop: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                  <CheckCircle2 size={28} color={PALETTE.verde} strokeWidth={2} aria-hidden />
+                  <span style={{ fontSize: 14, fontWeight: 600, color: PALETTE.verde }}>Tudo certo</span>
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 10,
+                    padding: "14px 16px",
+                    borderRadius: 12,
+                    background: "rgba(63,179,127,0.08)",
+                    border: `1px solid rgba(63,179,127,0.25)`,
+                    fontSize: 13,
+                    color: PALETTE.texto,
+                  }}
+                >
+                  {typeof importModal.totalLines === "number" ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                      <span style={{ color: PALETTE.textoSec }}>Linhas importadas</span>
+                      <span style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{importModal.totalLines}</span>
+                    </div>
+                  ) : null}
+                  {importModal.dashboardId ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                      <span style={{ color: PALETTE.textoSec }}>Dashboard</span>
+                      <code
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: PALETTE.texto,
+                          wordBreak: "break-all",
+                          textAlign: "right",
+                          maxWidth: "62%",
+                        }}
+                      >
+                        {importModal.dashboardId}
+                      </code>
+                    </div>
+                  ) : null}
+                  {importModal.ownerUserId ? (
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                      <span style={{ color: PALETTE.textoSec }}>Usuário dono</span>
+                      <code
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: PALETTE.texto,
+                          wordBreak: "break-all",
+                          textAlign: "right",
+                          maxWidth: "62%",
+                        }}
+                      >
+                        {importModal.ownerUserId}
+                      </code>
+                    </div>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={closeImportModal}
+                  style={{
+                    marginTop: 22,
+                    width: "100%",
+                    padding: "12px 16px",
+                    borderRadius: 12,
+                    border: "none",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    color: "#fff",
+                    background: PALETTE.azul,
+                  }}
+                >
+                  Fechar
+                </button>
+              </div>
+            )}
+
+            {importModal.phase === "error" && (
+              <div style={{ marginTop: 20 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+                  <XCircle size={26} color={PALETTE.vermelho} strokeWidth={2} style={{ flexShrink: 0 }} aria-hidden />
+                  <p style={{ margin: 0, fontSize: 14, color: PALETTE.texto, lineHeight: 1.5 }}>
+                    {importModal.errorMessage || "Erro desconhecido."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeImportModal}
+                  style={{
+                    marginTop: 8,
+                    width: "100%",
+                    padding: "12px 16px",
+                    borderRadius: 12,
+                    border: `1px solid ${PALETTE.borda}`,
+                    cursor: "pointer",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    color: PALETTE.texto,
+                    background: PALETTE.cinzaClaro,
+                  }}
+                >
+                  Fechar
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
