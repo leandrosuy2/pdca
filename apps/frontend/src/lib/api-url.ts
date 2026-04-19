@@ -1,12 +1,10 @@
 /**
- * URL da API NestJS.
+ * URL da API NestJS (chamadas a partir do navegador).
  *
- * 1) `NEXT_PUBLIC_API_URL` no `.env` (ex.: `https://api.seudominio.com`) — obrigatório quando a API está em
- *    outro host ou em painéis (Easypanel, etc.) em que o front é HTTPS na 443 e a porta **3001** do mesmo
- *    domínio **não** está acessível na internet.
- * 2) No navegador, se não houver env: mesmo **hostname** do front + `NEXT_PUBLIC_API_PORT` (padrão **3001**).
- *    Ex.: front em `http://31.97.166.208:3000` → API `http://31.97.166.208:3001`.
- * 3) Fallback local: `http://localhost:3001`.
+ * 1) `NEXT_PUBLIC_API_URL` — URL absoluta quando a API é outro domínio (ex.: CDN + API pública).
+ * 2) Sem env no browser: prefixo **`/api`** — o Next faz rewrite para o Nest (`API_INTERNAL_URL`, padrão
+ *    `http://127.0.0.1:3001`). Assim HTTPS na 443 não precisa expor a porta 3001 na internet.
+ * 3) Sem `window` (build/SSR): `http://127.0.0.1:3001` só se algo rodar fetch no servidor sem URL pública.
  */
 export function getApiUrl(): string {
   const fromEnv =
@@ -16,15 +14,10 @@ export function getApiUrl(): string {
   if (fromEnv) return fromEnv;
 
   if (typeof window !== 'undefined') {
-    const { protocol, hostname } = window.location;
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      const apiPort =
-        (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_API_PORT?.trim()) || '3001';
-      return `${protocol}//${hostname}:${apiPort}`;
-    }
+    return '/api';
   }
 
-  return 'http://localhost:3001';
+  return 'http://127.0.0.1:3001';
 }
 
 export function getDashboardApiUrl(): string {
