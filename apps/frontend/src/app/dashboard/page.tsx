@@ -12,7 +12,7 @@ import {
   AreaChart, Area, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ReferenceLine, ComposedChart
 } from "recharts";
 
-const TAB_KEYS = ['visaoGeral', 'porGestoras', 'custos', 'pessoas', 'porUnidade'] as const;
+const TAB_KEYS = ['visaoGeral', 'porGestoras', 'porUnidade', 'custos', 'pessoas'] as const;
 type TabKey = typeof TAB_KEYS[number];
 const decodeToken = (token: string) => {
   try {
@@ -629,7 +629,7 @@ const s = {
   h2: { fontSize: 16, fontWeight: 700, color: PALETTE.texto, marginBottom: 16 },
 };
 
-const ABAS = ["Visao Geral", "Por Gestoras", "Custos", "Pessoas", "Por Unidade"];
+const ABAS = ["Visao Geral", "Por Gestoras", "Por Unidade", "Custos", "Pessoas"];
 
 function DashboardContent() {
   const router = useRouter();
@@ -645,9 +645,9 @@ function DashboardContent() {
   const [monthFilters, setMonthFilters] = useState<Record<TabKey, string>>({
     visaoGeral: '',
     porGestoras: '',
+    porUnidade: '',
     custos: '',
     pessoas: '',
-    porUnidade: '',
   });
   const [filtroGestora, setFiltroGestora] = useState<string>("Todas");
   const [filtroUnidadeGestora, setFiltroUnidadeGestora] = useState<string>("Todas");
@@ -2625,7 +2625,7 @@ function DashboardContent() {
     );
   };
 
-  const abas = [AbaVisaoGeral, AbaPorGestoras, AbaCustos, AbaPessoas, AbaEvolutivos];
+  const abas = [AbaVisaoGeral, AbaPorGestoras, AbaEvolutivos, AbaCustos, AbaPessoas];
   const AbaAtual = abas[aba];
 
   return (
