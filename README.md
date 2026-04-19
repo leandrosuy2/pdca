@@ -233,14 +233,16 @@ npm run db:migrate
 npm run db:seed
 ```
 
-O seed (`apps/backend/prisma/seed.ts`) **zera** usuários e dados relacionados e recria um cenário completo de demonstração (vários usuários, dashboards, unidades, categorias, transações com gestoras e folha). **Senha de todos os logins de demo:** `123456`.
+O seed (`apps/backend/prisma/seed.ts`) **zera** usuários e dados relacionados e recria um cenário **denso**: ~24 meses de lançamentos por usuário, categorias **FOPEG** e **TURNOVER_OPERACIONAL** (para painel admin), tendência de faturamento e perfis de ranking (João maior, Pedro menor). **Senha:** `123456`.
 
 | E-mail | Perfil |
 |--------|--------|
-| `admin@pdca.com` | ADMIN |
-| `maria.silva@pdca.com` | USER (dados ricos, 2 dashboards) |
+| `admin@pdca.com` | ADMIN (poucos lançamentos) |
+| `joao.souza@pdca.com` | USER (maior faturamento no ranking) |
+| `maria.silva@pdca.com` | USER (3 unidades, 2 dashboards) |
 | `carlos.oliveira@pdca.com` | USER |
-| `ana.santos@pdca.com` | USER (acesso VIEW ao dashboard da Maria) |
+| `pedro.lima@pdca.com` | USER (menor escala no ranking) |
+| `ana.santos@pdca.com` | USER (14 meses; VIEW no dashboard da Maria) |
 | `inativo@pdca.com` | USER inativo (login bloqueado) |
 
 > Não rode o seed em produção se precisar manter dados. Altere senhas em ambientes reais.
@@ -269,6 +271,9 @@ npm run dev -w @pdca/web
 | Método | Caminho | Descrição |
 |--------|---------|-----------|
 | `POST` | `/auth/login` | Corpo: `{ "email", "password" }` → `{ access_token, user }` |
+| `GET` | `/users/summary` | Resumo de usuários (ADMIN): lançamentos, dashboards, última atividade |
+| `GET` | `/users/:id/detail` | Detalhe do usuário (ADMIN): contagens, dashboards, lançamentos recentes |
+| `GET` | `/dashboard/admin/inteligencia?year=` | ADMIN: consolidado mensal, ranking, trimestres, alertas, previsão simples |
 | `GET` | `/health` | Saúde do serviço |
 | `GET` | `/dashboard/catalog` | Lista dashboards (JWT) |
 | `GET` | `/dashboard/catalog/:dashboardId` | Metadados de um dashboard |

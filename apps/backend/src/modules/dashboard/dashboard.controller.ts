@@ -9,6 +9,11 @@ import { DashboardService } from './dashboard.service';
 export class DashboardController {
   constructor(private dashboardService: DashboardService) {}
 
+  @Get('admin/inteligencia')
+  getAdminInteligencia(@CurrentUser() user: any, @Query('year') year?: string) {
+    return this.dashboardService.getAdminInteligencia(user, year);
+  }
+
   @Get('catalog')
   listDashboards(@CurrentUser() user: any) {
     return this.dashboardService.listDashboards(user);

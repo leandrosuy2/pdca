@@ -22,7 +22,7 @@ export class DashboardService {
 
   private isFolhaDefinition(value: any) {
     const def = this.normalizeText(value);
-    return def === 'PROVENTOS' || def === 'ENCARGOS FOLHA';
+    return def === 'PROVENTOS' || def === 'ENCARGOS FOLHA' || def === 'FOPEG';
   }
 
   private isFolhaTransaction(t: { type: string; categoria?: { name?: string | null } | null; description?: string | null; qtdFunc?: number | null }) {
@@ -935,9 +935,12 @@ export class DashboardService {
 
     const structuredManagerByUnit = new Map<string, string>();
 
-    const parseStructuredFaturamentoSheet = () => {
-      const sheetName = findSheetByAliases(['FATURAMENTO', 'FATURACAO', 'RECEITA']);
-      if (!sheetName) return [];
+    const parseStructuredFaturamentoSheet = (forcedSheetName?: string) => {
+      const sheetName =
+        forcedSheetName && workbook.Sheets[forcedSheetName]
+          ? forcedSheetName
+          : findSheetByAliases(['FATURAMENTO', 'FATURACAO', 'RECEITA']);
+      if (!sheetName || !workbook.Sheets[sheetName]) return [];
 
       const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as any[][];
       const metaRow = rows.find((row) => normalizeHeader(cleanText(row[0])) === 'UNIDADE');
@@ -982,9 +985,12 @@ export class DashboardService {
         });
     };
 
-    const parseStructuredDespesasSheet = () => {
-      const sheetName = findSheetByAliases(['DESPESAS', 'CUSTOS']);
-      if (!sheetName) return [];
+    const parseStructuredDespesasSheet = (forcedSheetName?: string) => {
+      const sheetName =
+        forcedSheetName && workbook.Sheets[forcedSheetName]
+          ? forcedSheetName
+          : findSheetByAliases(['DESPESAS', 'CUSTOS']);
+      if (!sheetName || !workbook.Sheets[sheetName]) return [];
 
       const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as any[][];
       const unitRow = rows.find((row) => row.some((cell) => normalizeHeader(cleanText(cell)) === 'UNIDADE'));
@@ -1037,9 +1043,12 @@ export class DashboardService {
         });
     };
 
-    const parseStructuredSalariosSheet = () => {
-      const sheetName = findSheetByAliases(['SALARIOS', 'SALÁRIOS', 'FOLHA']);
-      if (!sheetName) return [];
+    const parseStructuredSalariosSheet = (forcedSheetName?: string, folhaCategoria = 'PROVENTOS') => {
+      const sheetName =
+        forcedSheetName && workbook.Sheets[forcedSheetName]
+          ? forcedSheetName
+          : findSheetByAliases(['SALARIOS', 'SALÁRIOS', 'FOLHA', 'FOPEG']);
+      if (!sheetName || !workbook.Sheets[sheetName]) return [];
 
       const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as any[][];
       const metaRow = rows.find((row) => row.some((cell) => normalizeHeader(cleanText(cell)) === 'UNIDADE'));
@@ -1074,7 +1083,7 @@ export class DashboardService {
             amount: salaryIndexes.reduce((acc, index) => acc + parseAmount(row[index]), 0),
             date,
             tipo: 'DESPESA',
-            catName: 'PROVENTOS',
+            catName: folhaCategoria,
             descr: gestoraName,
             gestora: gestoraName,
             qtdFunc,
@@ -1150,14 +1159,33 @@ export class DashboardService {
         })
         .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-    const structuredRows = [
+    let structuredRows = [
       ...parseStructuredDespesasSheet(),
       ...parseStructuredFaturamentoSheet(),
       ...parseStructuredSalariosSheet(),
     ];
 
-    const parsedRows =
+    if (structuredRows.length === 0 && workbook.SheetNames.length >= 3) {
+      const [n0, n1, n2] = workbook.SheetNames;
+      structuredRows = [
+        ...parseStructuredFaturamentoSheet(n0),
+        ...parseStructuredDespesasSheet(n1),
+        ...parseStructuredSalariosSheet(n2, 'FOPEG'),
+      ];
+    }
+
+    let parsedRows =
       structuredRows.length > 0 ? structuredRows : parseGenericRowsFromFlatSheet(data);
+
+    const dedupeKey = (r: (typeof parsedRows)[0]) =>
+      `${r.unidadeName}|${r.date.toISOString().slice(0, 10)}|${r.tipo}|${r.catName}|${r.amount}|${r.descr}|${r.gestora}`;
+    const seen = new Set<string>();
+    parsedRows = parsedRows.filter((r) => {
+      const k = dedupeKey(r);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
 
     if (parsedRows.length === 0) {
       throw new BadRequestException(
@@ -1215,6 +1243,208 @@ export class DashboardService {
       dashboardId: targetDashboardId,
       ownerUserId: targetUserId,
     };
+  }
+
+  private ensureAdminAnalytics(user: any) {
+    if (!this.isAdminUser(user)) {
+      throw new ForbiddenException('Acesso restrito a administradores.');
+    }
+  }
+
+  async getAdminGlobalConsolidated(user: any, yearStr?: string) {
+    this.ensureAdminAnalytics(user);
+    const y = yearStr && /^\d{4}$/.test(yearStr) ? Number(yearStr) : new Date().getUTCFullYear();
+    const start = new Date(Date.UTC(y, 0, 1));
+    const end = new Date(Date.UTC(y + 1, 0, 1));
+
+    const txs = await this.prisma.transacao.findMany({
+      where: { date: { gte: start, lt: end } },
+      include: { categoria: true },
+    });
+
+    const monthMap = new Map<string, { receita: number; despesa: number; fopeg: number; turnoverCat: number }>();
+
+    for (const t of txs) {
+      const m = t.date.toISOString().slice(0, 7);
+      if (!monthMap.has(m)) monthMap.set(m, { receita: 0, despesa: 0, fopeg: 0, turnoverCat: 0 });
+      const row = monthMap.get(m)!;
+      const type = String(t.type || '').toUpperCase();
+      const amt = Number(t.amount || 0);
+      if (type === 'RECEITA') row.receita += amt;
+      if (type === 'DESPESA') {
+        row.despesa += amt;
+        if (this.isFolhaTransaction(t)) row.fopeg += amt;
+        const cn = this.normalizeText(t.categoria?.name);
+        if (cn.includes('TURNOVER')) row.turnoverCat += amt;
+      }
+    }
+
+    const months = Array.from(monthMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, v]) => {
+        const turnoverBase = v.turnoverCat > 0 ? v.turnoverCat : Math.max(0, v.despesa - v.fopeg);
+        return {
+          month,
+          faturamento: v.receita,
+          fopeg: v.fopeg,
+          turnoverPct: this.divideSafely(turnoverBase, v.receita) * 100,
+          despesaTotal: v.despesa,
+          margemPct: this.divideSafely(v.receita - v.despesa, v.receita) * 100,
+        };
+      });
+
+    const alerts: Array<{ type: string; severity: string; message: string }> = [];
+    for (let i = 1; i < months.length; i++) {
+      const prev = months[i - 1].faturamento;
+      const cur = months[i].faturamento;
+      if (prev > 0 && cur < prev * 0.9) {
+        alerts.push({
+          type: 'faturamento_queda',
+          severity: 'warning',
+          message: `Queda de faturamento acima de 10% em ${months[i].month} frente a ${months[i - 1].month}.`,
+        });
+      }
+      const prevT = months[i - 1].turnoverPct;
+      const curT = months[i].turnoverPct;
+      if (curT > prevT + 5) {
+        alerts.push({
+          type: 'turnover_subida',
+          severity: 'info',
+          message: `Índice turnover (desp. não-folha vs fat.) subiu mais de 5 p.p. em ${months[i].month}.`,
+        });
+      }
+    }
+
+    return { year: y, months, alerts };
+  }
+
+  async getAdminUserRanking(user: any, yearStr?: string) {
+    this.ensureAdminAnalytics(user);
+    const y = yearStr && /^\d{4}$/.test(yearStr) ? Number(yearStr) : new Date().getUTCFullYear();
+    const start = new Date(Date.UTC(y, 0, 1));
+    const end = new Date(Date.UTC(y + 1, 0, 1));
+    const prevStart = new Date(Date.UTC(y - 1, 0, 1));
+    const prevEnd = new Date(Date.UTC(y, 0, 1));
+
+    const users = await this.prisma.user.findMany({
+      select: { id: true, name: true, email: true, active: true, role: true },
+    });
+
+    const sumsCurrent = await this.prisma.transacao.groupBy({
+      by: ['userId'],
+      where: { type: 'RECEITA', date: { gte: start, lt: end } },
+      _sum: { amount: true },
+    });
+    const sumsPrev = await this.prisma.transacao.groupBy({
+      by: ['userId'],
+      where: { type: 'RECEITA', date: { gte: prevStart, lt: prevEnd } },
+      _sum: { amount: true },
+    });
+    const desCurrent = await this.prisma.transacao.groupBy({
+      by: ['userId'],
+      where: { type: 'DESPESA', date: { gte: start, lt: end } },
+      _sum: { amount: true },
+    });
+
+    const curM = new Map(sumsCurrent.map((x) => [x.userId, Number(x._sum.amount || 0)]));
+    const prevM = new Map(sumsPrev.map((x) => [x.userId, Number(x._sum.amount || 0)]));
+    const desM = new Map(desCurrent.map((x) => [x.userId, Number(x._sum.amount || 0)]));
+
+    const ranking = users
+      .map((u) => {
+        const rec = curM.get(u.id) || 0;
+        const prev = prevM.get(u.id) || 0;
+        const des = desM.get(u.id) || 0;
+        const growthYoY = prev > 0 ? (rec - prev) / prev : rec > 0 ? 1 : 0;
+        const efficiency = this.divideSafely(rec, des + 1);
+        return {
+          userId: u.id,
+          name: u.name,
+          email: u.email,
+          active: u.active,
+          role: u.role,
+          faturamento: rec,
+          growthYoY,
+          efficiency,
+        };
+      })
+      .sort((a, b) => b.faturamento - a.faturamento)
+      .map((r, idx) => ({ ...r, rank: idx + 1 }));
+
+    return { year: y, ranking };
+  }
+
+  async getAdminQuarterly(user: any, yearStr?: string) {
+    this.ensureAdminAnalytics(user);
+    const y = yearStr && /^\d{4}$/.test(yearStr) ? Number(yearStr) : new Date().getUTCFullYear();
+    const start = new Date(Date.UTC(y, 0, 1));
+    const end = new Date(Date.UTC(y + 1, 0, 1));
+
+    const txs = await this.prisma.transacao.findMany({
+      where: { date: { gte: start, lt: end } },
+      include: { categoria: true },
+    });
+
+    const qMap = new Map<string, { receita: number; despesa: number; fopeg: number }>();
+    const qKey = (d: Date) => {
+      const m = d.getUTCMonth();
+      const q = Math.floor(m / 3) + 1;
+      return `${d.getUTCFullYear()}-Q${q}`;
+    };
+
+    for (const t of txs) {
+      const key = qKey(new Date(t.date));
+      if (!qMap.has(key)) qMap.set(key, { receita: 0, despesa: 0, fopeg: 0 });
+      const z = qMap.get(key)!;
+      const type = String(t.type || '').toUpperCase();
+      const amt = Number(t.amount || 0);
+      if (type === 'RECEITA') z.receita += amt;
+      if (type === 'DESPESA') {
+        z.despesa += amt;
+        if (this.isFolhaTransaction(t)) z.fopeg += amt;
+      }
+    }
+
+    const quarters = Array.from(qMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, v]) => ({
+        key,
+        faturamento: v.receita,
+        fopeg: v.fopeg,
+        turnoverPct: this.divideSafely(v.despesa - v.fopeg, v.receita) * 100,
+        margemPct: this.divideSafely(v.receita - v.despesa, v.receita) * 100,
+      }));
+
+    return { year: y, quarters };
+  }
+
+  async getAdminInteligencia(user: any, yearStr?: string) {
+    this.ensureAdminAnalytics(user);
+    const [consolidated, ranking, quarterly] = await Promise.all([
+      this.getAdminGlobalConsolidated(user, yearStr),
+      this.getAdminUserRanking(user, yearStr),
+      this.getAdminQuarterly(user, yearStr),
+    ]);
+
+    const ms = consolidated.months;
+    let forecast: Array<{ month: string; faturamentoEstimado: number; method: string }> = [];
+    if (ms.length >= 2) {
+      const last = ms[ms.length - 1];
+      const prev = ms[ms.length - 2];
+      const trend = last.faturamento - prev.faturamento;
+      const [y, m] = last.month.split('-').map(Number);
+      const nextD = new Date(Date.UTC(y, m, 1));
+      const nextMonth = nextD.toISOString().slice(0, 7);
+      forecast = [
+        {
+          month: nextMonth,
+          faturamentoEstimado: Math.max(0, last.faturamento + trend),
+          method: 'tendencia_ultimos_2_meses',
+        },
+      ];
+    }
+
+    return { ...consolidated, ranking: ranking.ranking, quarters: quarterly.quarters, forecast };
   }
 }
 

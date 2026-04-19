@@ -8,6 +8,16 @@ import { UsersService } from './users.service';
 export class UsersController {
   constructor(private usersService: UsersService) {}
 
+  @Get('summary')
+  getUsersSummary(@CurrentUser() user: any) {
+    return this.usersService.getUsersSummary(user);
+  }
+
+  @Get(':id/detail')
+  getUserDetail(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.usersService.getUserDetail(user, id);
+  }
+
   @Get()
   listUsers(@CurrentUser() user: any) {
     return this.usersService.listUsers(user);

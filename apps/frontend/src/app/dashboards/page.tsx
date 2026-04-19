@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import Cookies from 'js-cookie';
-import { LayoutGrid, Search, Shield, User, ArrowRight, Users } from 'lucide-react';
+import { BarChart3, LayoutGrid, Search, Shield, Sparkles, User, ArrowRight, Users } from 'lucide-react';
 
 const API_BASE = dashboardApiUrl;
 
@@ -98,7 +98,21 @@ export default function DashboardsPage() {
         </div>
 
         {isAdminRole(currentUser?.role) && (
-          <div className="mt-6 flex justify-end">
+          <div className="mt-6 flex flex-wrap justify-end gap-2">
+            <button
+              onClick={() => router.push('/admin/inteligencia')}
+              className="inline-flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/15"
+            >
+              <Sparkles size={16} />
+              Inteligência global
+            </button>
+            <button
+              onClick={() => router.push('/admin/resumo')}
+              className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold text-foreground transition hover:bg-muted/50"
+            >
+              <BarChart3 size={16} />
+              Resumo de usuários
+            </button>
             <button
               onClick={() => router.push('/admin/users')}
               className="inline-flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/15"
