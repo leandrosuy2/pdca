@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "start": "turbo run start --parallel",
+    "start": "turbo run start",
     "start:api": "npm run build -w @pdca/api && npm run start -w @pdca/api",
     "start:web": "npm run build -w @pdca/web && npm run start -w @pdca/web",
     "lint": "turbo run lint",

@@ -33,7 +33,7 @@ npm install
 npm run dev      # Turbo: API + Next em paralelo
 npm run build    # Build de todos os apps
 npm run start    # Produção: build + API + Next (Supervisor/Docker na raiz)
-npm run start:api   # Só Nest (build + node dist/main)
+npm run start:api   # Só Nest (build + node dist/src/main.js)
 npm run start:web   # Só Next (build + next start)
 npm run lint     # Lint em paralelo
 ```
