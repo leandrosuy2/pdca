@@ -47,7 +47,7 @@ npm run db:seed
 npm run db:studio
 ```
 
-**URL da API no frontend:** em `apps/frontend/.env` defina `NEXT_PUBLIC_API_URL` (ex.: `http://localhost:3001`). O Next carrega só `.env` nessa pasta.
+**Variáveis de ambiente:** `apps/backend/.env` e `apps/frontend/.env` ficam **versionados** neste repo (ajuste valores no clone se precisar). O Next lê só `.env` em `apps/frontend/`.
 
 ---
 

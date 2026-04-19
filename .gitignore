@@ -7,7 +7,6 @@ node_modules/
 apps/*/node_modules/
 apps/*/.next/
 apps/*/dist/
-apps/*/.env
 apps/*/*.tsbuildinfo
 apps/backend/dev.db
 apps/backend/.write-test
