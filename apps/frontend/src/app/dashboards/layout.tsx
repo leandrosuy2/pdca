@@ -1,8 +1,11 @@
 'use client';
 
+import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
-import { LogOut, TrendingUp, Bell, Search, UserCircle } from 'lucide-react';
+import { LogOut, Bell, Search, UserCircle } from 'lucide-react';
+import logoVV from '@/assets/logo_vv.png';
 
 export default function DashboardsLayout({
   children,
@@ -20,10 +23,21 @@ export default function DashboardsLayout({
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <header className="border-b border-border bg-card/50 backdrop-blur-md sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <TrendingUp size={28} className="text-primary" />
-            <h1 className="text-xl font-bold tracking-tight">FinDash Pro</h1>
-          </div>
+          <Link
+            href="/dashboards"
+            className="flex items-center rounded-lg p-1 outline-offset-2 transition-opacity hover:opacity-90 focus-visible:outline focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="Ir para início"
+          >
+            <Image
+              src={logoVV}
+              alt=""
+              priority
+              className="h-9 w-auto max-w-[200px] object-contain"
+              height={36}
+              width={200}
+              sizes="200px"
+            />
+          </Link>
 
           <div className="flex items-center space-x-6">
             <div className="relative hidden md:block">

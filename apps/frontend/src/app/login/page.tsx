@@ -1,11 +1,13 @@
 'use client';
 
 import { getAuthLoginUrl } from '@/lib/api-url';
+import Image from 'next/image';
+import logoVV from '@/assets/logo_vv.png';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
 import axios from 'axios';
-import { Lock, Mail, Loader2, TrendingUp } from 'lucide-react';
+import { Lock, Mail, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -42,9 +44,16 @@ export default function LoginPage() {
       <div className="hidden lg:flex flex-col flex-1 bg-card items-center justify-center p-12 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-full opacity-10 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-primary via-background to-background"></div>
         <div className="z-10 text-center max-w-lg space-y-6">
-          <div className="flex items-center justify-center space-x-3 mb-8">
-            <TrendingUp size={48} className="text-primary" />
-            <h1 className="text-4xl font-bold">FinDash Pro</h1>
+          <div className="flex flex-col items-center justify-center mb-8">
+            <Image
+              src={logoVV}
+              alt="FinDash Pro"
+              priority
+              className="h-14 w-auto max-w-[min(100%,280px)] object-contain sm:h-16"
+              height={64}
+              width={320}
+              sizes="(max-width: 1024px) 240px, 320px"
+            />
           </div>
           <h2 className="text-3xl font-semibold opacity-90">Inteligência Financeira em Tempo Real</h2>
           <p className="text-muted-foreground text-lg">
@@ -56,9 +65,16 @@ export default function LoginPage() {
       {/* Right side login */}
       <div className="flex-1 flex flex-col items-center justify-center p-8 bg-background">
         <div className="w-full max-w-md space-y-8">
-          <div className="text-center lg:hidden flex flex-col items-center space-y-2 mb-8">
-            <TrendingUp size={40} className="text-primary" />
-            <h1 className="text-3xl font-bold">FinDash Pro</h1>
+          <div className="text-center lg:hidden flex flex-col items-center mb-8">
+            <Image
+              src={logoVV}
+              alt="FinDash Pro"
+              priority
+              className="h-12 w-auto max-w-[min(100%,260px)] object-contain"
+              height={48}
+              width={280}
+              sizes="260px"
+            />
           </div>
 
           <div className="space-y-2 text-center">

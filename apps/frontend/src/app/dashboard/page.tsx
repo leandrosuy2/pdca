@@ -335,20 +335,24 @@ const buildNegativeUnitsComparison = (
   };
 };
 const PALETTE = {
-  verde:    "#3FB37F",
-  verdeEsc: "#2D8C63",
-  azul:     "#4C8DFF",
-  laranja:  "#F2A33C",
-  vermelho: "#E56B6F",
-  roxo:     "#8B7CFF",
-  rosa:     "#E07AB0",
-  cinzaClaro: "#1B2636",
-  cinza:    "#7F93AC",
-  fundo:    "#0D1726",
-  card:     "#142033",
-  borda:    "#22324A",
-  texto:    "#F2F6FB",
-  textoSec: "#9AAEC4",
+  verde:    "#16A34A",
+  verdeEsc: "#15803D",
+  azul:     "#2563EB",
+  laranja:  "#EA580C",
+  vermelho: "#DC2626",
+  roxo:     "#7C3AED",
+  rosa:     "#DB2777",
+  cinzaClaro: "#E2E8F0",
+  cinza:    "#64748B",
+  fundo:    "#F1F5F9",
+  card:     "#FFFFFF",
+  borda:    "#E2E8F0",
+  texto:    "#0F172A",
+  textoSec: "#64748B",
+  /** Blocos aninhados / gráficos em faixa */
+  painel: "#F8FAFC",
+  painel2: "#EFF6FF",
+  scrim: "rgba(15, 23, 42, 0.45)",
 };
 
 const CORES_UNIDADES = [PALETTE.azul, PALETTE.vermelho, PALETTE.verde, PALETTE.laranja, PALETTE.roxo, PALETTE.rosa];
@@ -378,7 +382,7 @@ const LabelMiniChartValue = ({ x = 0, y = 0, width = 0, height = 0, value = 0 }:
       fontSize={10}
       fontWeight={800}
       textAnchor="middle"
-      stroke="#182538"
+      stroke="#FFFFFF"
       strokeWidth={3}
       paintOrder="stroke"
     >
@@ -603,20 +607,19 @@ const s = {
     fontFamily: "'DM Sans', 'Segoe UI', sans-serif", padding: "0 0 40px",
   },
   header: {
-    background: "#101B2C", borderBottom: `1px solid ${PALETTE.borda}`,
+    background: PALETTE.card, borderBottom: `1px solid ${PALETTE.borda}`,
     padding: "18px 32px", display: "flex", justifyContent: "space-between", alignItems: "center",
   },
-  logo: { fontSize: 20, fontWeight: 800, letterSpacing: -0.5 },
   badge: (ativo: boolean) => ({
     padding: "6px 16px", borderRadius: 30, fontSize: 13, fontWeight: 600, cursor: "pointer",
-    background: ativo ? PALETTE.verdeEsc : "transparent",
-    color: ativo ? "#F6F8F2" : PALETTE.textoSec,
+    background: ativo ? PALETTE.verdeEsc : "rgba(255,255,255,0.85)",
+    color: ativo ? "#FFFFFF" : PALETTE.textoSec,
     border: `1px solid ${ativo ? PALETTE.verdeEsc : PALETTE.borda}`,
     transition: "all .2s",
   }),
   nav: {
     display: "flex", gap: 8, padding: "16px 32px",
-    borderBottom: `1px solid ${PALETTE.borda}`, background: "#111E31",
+    borderBottom: `1px solid ${PALETTE.borda}`, background: PALETTE.cinzaClaro,
     overflowX: "auto" as const, whiteSpace: "nowrap" as const
   },
   body: { padding: "28px 32px" },
@@ -1209,7 +1212,7 @@ function DashboardContent() {
         {comparativoNegativas.previousMonth && comparativoNegativas.rows.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 16 }}>
             {comparativoNegativas.rows.map((row: any) => (
-              <div key={row.nome} style={{ background: "#182538", border: `1px solid ${PALETTE.borda}`, borderRadius: 16, padding: "16px 18px", boxShadow: "0 14px 30px rgba(0,0,0,0.22)" }}>
+              <div key={row.nome} style={{ background: PALETTE.painel, border: `1px solid ${PALETTE.borda}`, borderRadius: 16, padding: "16px 18px", boxShadow: "0 8px 28px rgba(15,23,42,0.08)" }}>
                 <div style={{ color: PALETTE.texto, fontSize: 18, fontWeight: 800, letterSpacing: -0.3, marginBottom: 12 }}>
                   {row.nome}
                 </div>
@@ -1249,7 +1252,7 @@ function DashboardContent() {
                           if (!active || !payload?.length) return null;
                           const data = payload[0]?.payload;
                           return (
-                            <div style={{ background: "#1D2B40", border: `1px solid ${PALETTE.borda}`, borderRadius: 10, padding: "10px 14px" }}>
+                            <div style={{ background: PALETTE.painel2, border: `1px solid ${PALETTE.borda}`, borderRadius: 10, padding: "10px 14px" }}>
                               <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 6 }}>{label}</div>
                               <div style={{ color: toNum(data?.valor) >= 0 ? PALETTE.verde : PALETTE.vermelho, fontSize: 13, fontWeight: 700 }}>
                                 Resultado: {fmtK(toNum(data?.valor))}
@@ -1281,8 +1284,8 @@ function DashboardContent() {
                         stroke={PALETTE.laranja}
                         strokeWidth={3}
                         connectNulls={false}
-                        dot={{ r: 5, fill: PALETTE.laranja, stroke: "#182538", strokeWidth: 2 }}
-                        activeDot={{ r: 7, fill: PALETTE.laranja, stroke: "#182538", strokeWidth: 2 }}
+                        dot={{ r: 5, fill: PALETTE.laranja, stroke: PALETTE.card, strokeWidth: 2 }}
+                        activeDot={{ r: 7, fill: PALETTE.laranja, stroke: PALETTE.card, strokeWidth: 2 }}
                       />
                     </ComposedChart>
                   </ResponsiveContainer>
@@ -1383,7 +1386,7 @@ function DashboardContent() {
       textAlign: "right" as const,
       verticalAlign: "middle" as const,
     };
-    const bordaEntreGestorasDet = `4px solid rgba(127, 147, 172, 0.45)`;
+    const bordaEntreGestorasDet = `4px solid rgba(148, 163, 184, 0.55)`;
     const bordaEntreLinhasDet = `1px solid ${PALETTE.borda}`;
     const renderCelulaTotalGestDet = (
       valor: ReactNode,
@@ -2507,7 +2510,7 @@ function DashboardContent() {
                       <div
                         key={`${unit.nome}-${row.mesLabel}-resumo`}
                         style={{
-                          background: "#182538",
+                          background: PALETTE.painel,
                           border: `1px solid ${PALETTE.borda}`,
                           borderRadius: 12,
                           padding: "12px 14px",
@@ -2633,8 +2636,8 @@ function DashboardContent() {
       {/* HEADER */}
       <div style={s.header}>
         <div>
-          <div style={s.logo}>FinDash Pro (Modelo Unificado)</div>
-          <div style={{ color: PALETTE.textoSec, fontSize: 12, marginTop: 2 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: PALETTE.texto, letterSpacing: -0.2 }}>Painel</div>
+          <div style={{ color: PALETTE.textoSec, fontSize: 12, marginTop: 4 }}>
             Visualizacao padronizada - {unidades.length} unidades
             {dashboardMeta?.owner?.name ? ` - Proprietario: ${dashboardMeta.owner.name}` : ''}
           </div>
@@ -2683,7 +2686,7 @@ function DashboardContent() {
             alignItems: "center",
             justifyContent: "center",
             padding: 24,
-            background: "rgba(10, 18, 32, 0.82)",
+            background: PALETTE.scrim,
             backdropFilter: "blur(12px)",
           }}
           onClick={(e) => {
@@ -2698,9 +2701,9 @@ function DashboardContent() {
               maxWidth: 440,
               borderRadius: 22,
               padding: "28px 26px 22px",
-              background: `linear-gradient(160deg, ${PALETTE.card} 0%, #0f1829 55%, #0c1524 100%)`,
+              background: `linear-gradient(160deg, ${PALETTE.card} 0%, ${PALETTE.painel} 55%, ${PALETTE.fundo} 100%)`,
               border: `1px solid ${PALETTE.borda}`,
-              boxShadow: "0 28px 90px rgba(0,0,0,0.5), 0 0 0 1px rgba(76,141,255,0.14)",
+              boxShadow: "0 24px 60px rgba(15,23,42,0.12), 0 0 0 1px rgba(37,99,235,0.08)",
             }}
           >
             <div
@@ -2708,8 +2711,8 @@ function DashboardContent() {
                 width: 52,
                 height: 52,
                 borderRadius: 14,
-                background: "rgba(76,141,255,0.12)",
-                border: `1px solid rgba(76,141,255,0.35)`,
+                background: "rgba(37, 99, 235, 0.1)",
+                border: `1px solid rgba(37, 99, 235, 0.28)`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -2802,8 +2805,8 @@ function DashboardContent() {
                     gap: 10,
                     padding: "14px 16px",
                     borderRadius: 12,
-                    background: "rgba(63,179,127,0.08)",
-                    border: `1px solid rgba(63,179,127,0.25)`,
+                    background: "rgba(22, 163, 74, 0.08)",
+                    border: `1px solid rgba(22, 163, 74, 0.22)`,
                     fontSize: 13,
                     color: PALETTE.texto,
                   }}
