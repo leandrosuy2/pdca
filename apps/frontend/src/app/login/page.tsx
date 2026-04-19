@@ -1,6 +1,6 @@
 'use client';
 
-import { authLoginUrl } from '@/lib/api-url';
+import { getAuthLoginUrl } from '@/lib/api-url';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
@@ -20,7 +20,7 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const response = await axios.post(authLoginUrl, {
+      const response = await axios.post(getAuthLoginUrl(), {
         email,
         password,
       });

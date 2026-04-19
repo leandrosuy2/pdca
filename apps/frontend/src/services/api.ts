@@ -1,8 +1,8 @@
-import { healthUrl } from '@/lib/api-url';
+import { getHealthUrl } from '@/lib/api-url';
 
 export async function checkBackendHealth() {
   try {
-    const res = await fetch(healthUrl, {
+    const res = await fetch(getHealthUrl(), {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

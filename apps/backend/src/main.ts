@@ -31,9 +31,21 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
   
+  const corsRaw = configService.get<string>('CORS_ORIGIN')?.trim() || '';
+  // Com credentials: true o navegador NÃO aceita Access-Control-Allow-Origin: * — quebra o login no front.
+  let corsOrigin: boolean | string[] = true;
+  if (corsRaw && corsRaw !== '*') {
+    corsOrigin = corsRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   app.enableCors({
-    origin: '*', // Adjust for production
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    origin: corsOrigin,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    exposedHeaders: ['Content-Disposition'],
     credentials: true,
   });
 

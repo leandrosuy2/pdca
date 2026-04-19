@@ -1,13 +1,12 @@
 'use client';
 
-import { dashboardApiUrl } from '@/lib/api-url';
+import { getDashboardApiUrl } from '@/lib/api-url';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 import { BarChart3, LayoutGrid, Search, Shield, Sparkles, User, ArrowRight, Users } from 'lucide-react';
 
-const API_BASE = dashboardApiUrl;
 
 const decodeToken = (token: string) => {
   try {
@@ -32,7 +31,7 @@ export default function DashboardsPage() {
     const fetchDashboards = async () => {
       try {
         const token = Cookies.get('token');
-        const response = await axios.get(`${API_BASE}/catalog`, {
+        const response = await axios.get(`${getDashboardApiUrl()}/catalog`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         setDashboards(response.data.dashboards || []);

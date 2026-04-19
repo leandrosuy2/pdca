@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { dashboardApiUrl } from '@/lib/api-url';
+import { getDashboardApiUrl } from '@/lib/api-url';
 import { Suspense, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import axios from "axios";
@@ -11,7 +11,6 @@ import {
   AreaChart, Area, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ReferenceLine, ComposedChart
 } from "recharts";
 
-const API_BASE = dashboardApiUrl;
 const TAB_KEYS = ['visaoGeral', 'porUnidade', 'porGestoras', 'custos', 'tendencia', 'pessoas', 'evolutivos'] as const;
 type TabKey = typeof TAB_KEYS[number];
 const decodeToken = (token: string) => {
@@ -640,13 +639,13 @@ function DashboardContent() {
     const qs = `?${params.toString()}`;
 
     const requestEntries = [
-      ['overview', axios.get(`${API_BASE}/overview${qs}`, config)],
-      ['units', axios.get(`${API_BASE}/units${qs}`, config)],
-      ['managers', axios.get(`${API_BASE}/managers${qs}`, config)],
-      ['costs', axios.get(`${API_BASE}/costs${qs}`, config)],
-      ['people', axios.get(`${API_BASE}/people${qs}`, config)],
-      ['trends', axios.get(`${API_BASE}/trends${qs}`, config)],
-      ['meta', activeDashboardId ? axios.get(`${API_BASE}/catalog/${activeDashboardId}?_t=${Date.now()}`, config) : Promise.resolve({ data: null })],
+      ['overview', axios.get(`${getDashboardApiUrl()}/overview${qs}`, config)],
+      ['units', axios.get(`${getDashboardApiUrl()}/units${qs}`, config)],
+      ['managers', axios.get(`${getDashboardApiUrl()}/managers${qs}`, config)],
+      ['costs', axios.get(`${getDashboardApiUrl()}/costs${qs}`, config)],
+      ['people', axios.get(`${getDashboardApiUrl()}/people${qs}`, config)],
+      ['trends', axios.get(`${getDashboardApiUrl()}/trends${qs}`, config)],
+      ['meta', activeDashboardId ? axios.get(`${getDashboardApiUrl()}/catalog/${activeDashboardId}?_t=${Date.now()}`, config) : Promise.resolve({ data: null })],
     ] as const;
 
     const settled = await Promise.allSettled(requestEntries.map(([, promise]) => promise));
@@ -711,7 +710,7 @@ function DashboardContent() {
 
     try {
       const importQs = activeDashboardId ? `?dashboardId=${activeDashboardId}` : '';
-      const response = await axios.post(`${API_BASE}/import${importQs}`, formData, {
+      const response = await axios.post(`${getDashboardApiUrl()}/import${importQs}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data', Authorization: `Bearer ${token}` }
       });
       const total = response?.data?.totalImportado;

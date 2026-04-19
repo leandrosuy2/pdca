@@ -1,6 +1,6 @@
 'use client';
 
-import { dashboardApiUrl } from '@/lib/api-url';
+import { getDashboardApiUrl } from '@/lib/api-url';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
@@ -18,7 +18,6 @@ import {
 } from 'recharts';
 import { AlertTriangle, BarChart3, Sparkles, TrendingUp } from 'lucide-react';
 
-const API = `${dashboardApiUrl}/admin/inteligencia`;
 
 const decodeToken = (token: string) => {
   try {
@@ -66,7 +65,7 @@ export default function AdminInteligenciaPage() {
       setLoading(true);
       setError('');
       try {
-        const { data: body } = await axios.get(API, {
+        const { data: body } = await axios.get(`${getDashboardApiUrl()}/admin/inteligencia`, {
           params: { year },
           headers: { Authorization: `Bearer ${token}` },
         });

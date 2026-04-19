@@ -47,7 +47,7 @@ npm run db:seed
 npm run db:studio
 ```
 
-**Variáveis de ambiente:** `apps/backend/.env` e `apps/frontend/.env` ficam **versionados** neste repo (ajuste valores no clone se precisar). O Next lê só `.env` em `apps/frontend/`.
+**Variáveis de ambiente:** `apps/backend/.env` e `apps/frontend/.env` (ajuste no clone). No **front**, se `NEXT_PUBLIC_API_URL` estiver **vazio**, no navegador as chamadas vão para o **mesmo hostname** da página + `NEXT_PUBLIC_API_PORT` (padrão `3001`) — evita ficar preso em `localhost` no servidor. Defina `NEXT_PUBLIC_API_URL` só se a API for outro domínio.
 
 ---
 
@@ -323,7 +323,7 @@ PDCA-main/
 ## Produção e segurança
 
 - **`npm start` na raiz** existe para PaaS/Supervisor: executa **build** e sobe API + frontend. Avisos `deprecated` no `npm install` vêm sobretudo de dependências **transitivas** (eslint, glob, etc.); `npm audit` ajuda a priorizar correções. O erro `unix:///var/run/supervisor.sock` é do **host/supervisor**, não do Node.
-- Restrinja **CORS** (`apps/backend/src/main.ts` hoje usa `origin: '*'`) ao domínio do frontend.
+- **CORS:** com `credentials: true` o navegador **não aceita** `Access-Control-Allow-Origin: *`. O backend usa **`origin: true`** (reflete o `Origin` da requisição) ou lista em **`CORS_ORIGIN`** no `.env` (ex.: `https://app.seudominio.com,http://localhost:3000`). O `curl` no terminal **não** passa por CORS — só o navegador.
 - Use `JWT_SECRET` forte e rotação de credenciais.
 - Configure HTTPS e cookies com flags adequadas (`Secure`, `SameSite`) se unificar API e UI no mesmo domínio.
 

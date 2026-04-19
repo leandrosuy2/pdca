@@ -1,6 +1,6 @@
 'use client';
 
-import { usersApiUrl } from '@/lib/api-url';
+import { getUsersApiUrl } from '@/lib/api-url';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
@@ -15,7 +15,6 @@ import {
   User,
 } from 'lucide-react';
 
-const API = usersApiUrl;
 
 const decodeToken = (token: string) => {
   try {
@@ -67,7 +66,7 @@ export default function AdminResumoPage() {
 
     const load = async () => {
       try {
-        const { data } = await axios.get<{ users: SummaryRow[] }>(`${API}/summary`, {
+        const { data } = await axios.get<{ users: SummaryRow[] }>(`${getUsersApiUrl()}/summary`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setRows(data.users || []);

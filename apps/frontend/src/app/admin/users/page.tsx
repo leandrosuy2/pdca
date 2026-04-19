@@ -1,13 +1,12 @@
 'use client';
 
-import { usersApiUrl } from '@/lib/api-url';
+import { getUsersApiUrl } from '@/lib/api-url';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 import { Plus, Shield, Trash2, User } from 'lucide-react';
 
-const API_BASE = usersApiUrl;
 
 const decodeToken = (token: string) => {
   try {
@@ -49,7 +48,7 @@ export default function AdminUsersPage() {
 
     const fetchUsers = async () => {
       try {
-        const response = await axios.get(API_BASE, {
+        const response = await axios.get(getUsersApiUrl(), {
           headers: { Authorization: `Bearer ${token}` },
         });
         setUsers(response.data.users || []);
@@ -69,7 +68,7 @@ export default function AdminUsersPage() {
     setError('');
 
     try {
-      const response = await axios.post(API_BASE, form, {
+      const response = await axios.post(getUsersApiUrl(), form, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -96,7 +95,7 @@ export default function AdminUsersPage() {
     setError('');
 
     try {
-      await axios.post(`${API_BASE}/${user.id}/clear-dashboard-data`, {}, {
+      await axios.post(`${getUsersApiUrl()}/${user.id}/clear-dashboard-data`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
     } catch (err: any) {

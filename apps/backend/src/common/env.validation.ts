@@ -6,6 +6,8 @@ export const envSchema = z.object({
   JWT_SECRET: z
     .string()
     .min(1, 'JWT_SECRET é obrigatório — defina em apps/backend/.env (ou na raiz do monorepo com as variáveis da API).'),
+  /** Origens permitidas separadas por vírgula. Vazio = reflete o header Origin (recomendado com credentials). */
+  CORS_ORIGIN: z.string().optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

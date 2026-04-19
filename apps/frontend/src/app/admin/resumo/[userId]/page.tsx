@@ -1,6 +1,6 @@
 'use client';
 
-import { usersApiUrl } from '@/lib/api-url';
+import { getUsersApiUrl } from '@/lib/api-url';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import axios from 'axios';
@@ -13,7 +13,6 @@ import {
   User,
 } from 'lucide-react';
 
-const API = usersApiUrl;
 
 const decodeToken = (token: string) => {
   try {
@@ -56,7 +55,7 @@ export default function AdminResumoDetalhePage() {
 
     const load = async () => {
       try {
-        const { data: body } = await axios.get(`${API}/${userId}/detail`, {
+        const { data: body } = await axios.get(`${getUsersApiUrl()}/${userId}/detail`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setData(body);
