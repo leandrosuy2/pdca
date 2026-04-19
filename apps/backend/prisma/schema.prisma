@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String      @id @default(uuid())
+  name      String
+  email     String      @unique
+  password  String
+  role      String      @default("USER")
+  active    Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  unidades     Unidade[]
+  categorias   Categoria[]
+  transacoes   Transacao[]
+  dashboards   Dashboard[]       @relation("DashboardOwner")
+  dashboardAccess DashboardAccess[]
+}
+
+model Dashboard {
+  id          String            @id @default(uuid())
+  name        String
+  slug        String            @unique
+  description String?
+  ownerId     String
+  owner       User              @relation("DashboardOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  isDefault   Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  access      DashboardAccess[]
+}
+
+model DashboardAccess {
+  id          String      @id @default(uuid())
+  dashboardId String
+  dashboard   Dashboard   @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission  String      @default("VIEW")
+  createdAt   DateTime    @default(now())
+
+  @@unique([dashboardId, userId])
+}
+
+model Unidade {
+  id        String      @id @default(uuid())
+  name      String
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  transacoes Transacao[]
+}
+
+model Categoria {
+  id        String      @id @default(uuid())
+  name      String
+  type      String      // "RECEITA" ou "DESPESA"
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  transacoes Transacao[]
+}
+
+model Transacao {
+  id          String      @id @default(uuid())
+  description String
+  gestora     String?
+  amount      Float
+  date        DateTime    @default(now())
+  type        String      // "RECEITA" ou "DESPESA"
+  qtdFunc     Int?        // Quantidade de funcionários no mês
+  
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  unidadeId   String
+  unidade     Unidade     @relation(fields: [unidadeId], references: [id], onDelete: Cascade)
+
+  categoriaId String
+  categoria   Categoria   @relation(fields: [categoriaId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}

@@ -1,0 +1,19 @@
+# Raiz / Turborepo
+node_modules/
+.turbo/
+*.log
+
+# Apps
+apps/*/node_modules/
+apps/*/.next/
+apps/*/dist/
+apps/*/.env
+apps/*/.env.local
+apps/*/*.tsbuildinfo
+apps/backend/dev.db
+apps/backend/.write-test
+apps/backend/check_*_tmp.js
+
+# OS
+.DS_Store
+Thumbs.db
