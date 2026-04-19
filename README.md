@@ -32,6 +32,9 @@ O repositório é um **monorepo** com pacotes em `apps/` e orquestração na rai
 npm install
 npm run dev      # Turbo: API + Next em paralelo
 npm run build    # Build de todos os apps
+npm run start    # Produção: build + API + Next (Supervisor/Docker na raiz)
+npm run start:api   # Só Nest (build + node dist/main)
+npm run start:web   # Só Next (build + next start)
 npm run lint     # Lint em paralelo
 ```
 
@@ -44,7 +47,7 @@ npm run db:seed
 npm run db:studio
 ```
 
-**URL da API no frontend:** copie `apps/frontend/.env.example` para `apps/frontend/.env.local` e defina `NEXT_PUBLIC_API_URL` (padrão: `http://localhost:3001`).
+**URL da API no frontend:** em `apps/frontend/.env` defina `NEXT_PUBLIC_API_URL` (ex.: `http://localhost:3001`). O Next carrega só `.env` nessa pasta.
 
 ---
 
@@ -242,7 +245,7 @@ O seed (`apps/backend/prisma/seed.ts`) **zera** usuários e dados relacionados e
 
 > Não rode o seed em produção se precisar manter dados. Altere senhas em ambientes reais.
 
-5. (Opcional) `apps/frontend/.env.local` com `NEXT_PUBLIC_API_URL` se a API não for `http://localhost:3001`.
+5. (Opcional) Em `apps/frontend/.env`, ajuste `NEXT_PUBLIC_API_URL` se a API não for `http://localhost:3001`.
 
 6. Desenvolvimento — **na raiz**:
 
@@ -314,6 +317,7 @@ PDCA-main/
 
 ## Produção e segurança
 
+- **`npm start` na raiz** existe para PaaS/Supervisor: executa **build** e sobe API + frontend. Avisos `deprecated` no `npm install` vêm sobretudo de dependências **transitivas** (eslint, glob, etc.); `npm audit` ajuda a priorizar correções. O erro `unix:///var/run/supervisor.sock` é do **host/supervisor**, não do Node.
 - Restrinja **CORS** (`apps/backend/src/main.ts` hoje usa `origin: '*'`) ao domínio do frontend.
 - Use `JWT_SECRET` forte e rotação de credenciais.
 - Configure HTTPS e cookies com flags adequadas (`Secure`, `SameSite`) se unificar API e UI no mesmo domínio.
