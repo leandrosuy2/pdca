@@ -1936,10 +1936,14 @@ function DashboardContent() {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(v: any, _n: string, item: any) => {
+                    formatter={(v, name, item) => {
                       const val = toNum(v);
                       const pct = pieTotalValor > 0 ? val / pieTotalValor : 0;
-                      return [`${fmt(val)} (${(pct * 100).toFixed(2)}%)`, item?.payload?.nome ?? "Despesa"];
+                      const fromPayload = (item as { payload?: { nome?: string } } | undefined)?.payload?.nome;
+                      const fromName =
+                        typeof name === "string" || typeof name === "number" ? String(name) : "";
+                      const label = fromPayload || fromName || "Despesa";
+                      return [`${fmt(val)} (${(pct * 100).toFixed(2)}%)`, label];
                     }}
                   />
                 </PieChart>
