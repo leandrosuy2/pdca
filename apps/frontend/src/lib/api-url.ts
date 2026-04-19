@@ -1,7 +1,9 @@
 /**
  * URL da API NestJS.
  *
- * 1) `NEXT_PUBLIC_API_URL` no `.env` (ex.: `https://api.seudominio.com`) — use quando API e front estiverem em hosts diferentes.
+ * 1) `NEXT_PUBLIC_API_URL` no `.env` (ex.: `https://api.seudominio.com`) — obrigatório quando a API está em
+ *    outro host ou em painéis (Easypanel, etc.) em que o front é HTTPS na 443 e a porta **3001** do mesmo
+ *    domínio **não** está acessível na internet.
  * 2) No navegador, se não houver env: mesmo **hostname** do front + `NEXT_PUBLIC_API_PORT` (padrão **3001**).
  *    Ex.: front em `http://31.97.166.208:3000` → API `http://31.97.166.208:3001`.
  * 3) Fallback local: `http://localhost:3001`.

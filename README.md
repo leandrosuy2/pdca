@@ -47,7 +47,9 @@ npm run db:seed
 npm run db:studio
 ```
 
-**Variáveis de ambiente:** `apps/backend/.env` e `apps/frontend/.env` (ajuste no clone). No **front**, se `NEXT_PUBLIC_API_URL` estiver **vazio**, no navegador as chamadas vão para o **mesmo hostname** da página + `NEXT_PUBLIC_API_PORT` (padrão `3001`) — evita ficar preso em `localhost` no servidor. Defina `NEXT_PUBLIC_API_URL` só se a API for outro domínio.
+**Variáveis de ambiente:** `apps/backend/.env` e `apps/frontend/.env` (ajuste no clone). No **front**, se `NEXT_PUBLIC_API_URL` estiver **vazio**, no navegador as chamadas vão para o **mesmo hostname** da página + `NEXT_PUBLIC_API_PORT` (padrão `3001`) — útil em VPS com IP e portas abertas. Defina `NEXT_PUBLIC_API_URL` quando a API tiver **outro host** ou quando o front estiver em **HTTPS na 443** e a API **não** estiver publicada em `seu-dominio:3001` (caso típico de **Easypanel**, Traefik, Nginx só com 443).
+
+**Easypanel / HTTPS (ex.: front em `https://pdca.vvrefeicoes.com.br` e stack em `*.easypanel.host`):** o navegador não alcança `https://pdca.vvrefeicoes.com.br:3001` se essa porta não estiver exposta na internet — o painel costuma publicar a API em **outra URL HTTPS** (subdomínio do serviço Nest). No **build do Next**, defina `NEXT_PUBLIC_API_URL` com a **URL pública completa da API** (sem barra no final), por exemplo `https://<servico-api>.hlz1f3.easypanel.host`, faça **rebuild** do frontend e redeploy. No backend, inclua o(s) domínio(s) do front em `CORS_ORIGIN` (lista separada por vírgula), ex.: `https://pdca.vvrefeicoes.com.br,https://agenda-pdca-monorepo.hlz1f3.easypanel.host`, se não estiver usando reflexão automática de origem.
 
 ---
 
