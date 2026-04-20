@@ -1,12 +1,12 @@
 'use client';
 
 import { getDashboardApiUrl } from '@/lib/api-url';
+import { getDashboardTemplateMeta } from '@/lib/dashboard-templates';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 import { BarChart3, LayoutGrid, Search, Shield, Sparkles, User, ArrowRight, Users } from 'lucide-react';
-
 
 const decodeToken = (token: string) => {
   try {
@@ -30,9 +30,9 @@ export default function DashboardsPage() {
   useEffect(() => {
     const fetchDashboards = async () => {
       try {
-        const token = Cookies.get('token');
+        const currentToken = Cookies.get('token');
         const response = await axios.get(`${getDashboardApiUrl()}/catalog`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${currentToken}` },
         });
         setDashboards(response.data.dashboards || []);
       } catch (error) {
@@ -51,7 +51,7 @@ export default function DashboardsPage() {
     return dashboards.filter((dashboard) =>
       [dashboard.name, dashboard.slug, dashboard.owner?.name, dashboard.owner?.email]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(termo))
+        .some((value) => String(value).toLowerCase().includes(termo)),
     );
   }, [dashboards, query]);
 
@@ -75,7 +75,7 @@ export default function DashboardsPage() {
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Escolha um dashboard para continuar</h1>
               <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                Cada conta visualiza apenas os dashboards liberados pelo seu perfil. Administradores enxergam todos; usuários comuns veem somente os dashboards vinculados.
+                Cada conta visualiza apenas os dashboards liberados pelo seu perfil. Administradores enxergam todos; usuarios comuns veem somente os dashboards vinculados.
               </p>
             </div>
           </div>
@@ -89,7 +89,7 @@ export default function DashboardsPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Nome, slug, proprietário..."
+                placeholder="Nome, slug, proprietario..."
                 className="w-full rounded-xl border border-border bg-background px-10 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
               />
             </div>
@@ -103,63 +103,78 @@ export default function DashboardsPage() {
               className="inline-flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/15"
             >
               <Sparkles size={16} />
-              Inteligência global
+              Inteligencia global
             </button>
             <button
               onClick={() => router.push('/admin/resumo')}
               className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-semibold text-foreground transition hover:bg-muted/50"
             >
               <BarChart3 size={16} />
-              Resumo de usuários
+              Resumo de usuarios
             </button>
             <button
               onClick={() => router.push('/admin/users')}
               className="inline-flex items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm font-semibold text-primary transition hover:bg-primary/15"
             >
               <Users size={16} />
-              Gestão de usuários
+              Gestao de usuarios
             </button>
           </div>
         )}
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {dashboardsFiltrados.map((dashboard) => (
-          <button
-            key={dashboard.id}
-            onClick={() => router.push(`/dashboard?dashboardId=${dashboard.id}`)}
-            className="group rounded-2xl border border-border bg-card p-6 text-left transition hover:border-primary/50 hover:bg-card/80"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-3">
-                <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                  {isAdminRole(dashboard.owner?.role) ? <Shield size={12} /> : <User size={12} />}
-                  {isAdminRole(dashboard.owner?.role) ? 'Administrador' : 'Usuário'}
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-foreground">{dashboard.name}</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">{dashboard.description || 'Dashboard sem descrição cadastrada.'}</p>
-                </div>
-              </div>
-              <ArrowRight className="h-5 w-5 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
-            </div>
+        {dashboardsFiltrados.map((dashboard) => {
+          const templateMeta = getDashboardTemplateMeta(dashboard.template);
 
-            <div className="mt-6 grid gap-3 rounded-xl border border-border/80 bg-background/60 p-4 text-sm">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Proprietário</span>
-                <span className="font-medium text-foreground">{dashboard.owner?.name || '—'}</span>
+          return (
+            <button
+              key={dashboard.id}
+              onClick={() => router.push(`/dashboard?dashboardId=${dashboard.id}`)}
+              className="group rounded-2xl border border-border bg-card p-6 text-left transition hover:border-primary/50 hover:bg-card/80"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                      {isAdminRole(dashboard.owner?.role) ? <Shield size={12} /> : <User size={12} />}
+                      {isAdminRole(dashboard.owner?.role) ? 'Administrador' : 'Usuario'}
+                    </div>
+                    <div className="inline-flex items-center rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+                      {templateMeta.label}
+                    </div>
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">{dashboard.name}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {dashboard.description || 'Dashboard sem descricao cadastrada.'}
+                    </p>
+                  </div>
+                </div>
+                <ArrowRight className="h-5 w-5 text-muted-foreground transition group-hover:translate-x-1 group-hover:text-primary" />
               </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">E-mail</span>
-                <span className="truncate font-medium text-foreground">{dashboard.owner?.email || '—'}</span>
+
+              <div className="mt-6 grid gap-3 rounded-xl border border-border/80 bg-background/60 p-4 text-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-muted-foreground">Proprietario</span>
+                  <span className="font-medium text-foreground">{dashboard.owner?.name || '-'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-muted-foreground">E-mail</span>
+                  <span className="truncate font-medium text-foreground">{dashboard.owner?.email || '-'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-muted-foreground">Slug</span>
+                  <span className="font-mono text-xs text-primary">{dashboard.slug}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-muted-foreground">Modelo</span>
+                  <span className="font-medium text-foreground">{templateMeta.label}</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-muted-foreground">Slug</span>
-                <span className="font-mono text-xs text-primary">{dashboard.slug}</span>
-              </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          );
+        })}
       </section>
 
       {!dashboardsFiltrados.length && (

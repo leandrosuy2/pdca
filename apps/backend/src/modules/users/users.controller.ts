@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { UsersService } from './users.service';
@@ -31,5 +31,10 @@ export class UsersController {
   @Post(':id/clear-dashboard-data')
   clearDashboardData(@CurrentUser() user: any, @Param('id') id: string) {
     return this.usersService.clearUserDashboardData(user, id);
+  }
+
+  @Delete(':id')
+  deleteUser(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.usersService.deleteUser(user, id);
   }
 }

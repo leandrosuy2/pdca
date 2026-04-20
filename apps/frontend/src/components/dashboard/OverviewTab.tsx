@@ -48,7 +48,7 @@ export function OverviewTab({ data }: { data: any }) {
           trend={-2.4} 
         />
         <KpiCard 
-          title="Lucro Líquido" 
+          title="Resultado Liquido" 
           value={kpis.lucro} 
           format="currency" 
           icon={<DollarSign />} 

@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import axios from "axios";
 import Cookies from "js-cookie";
 import { Loader2, CheckCircle2, XCircle, FileSpreadsheet } from "lucide-react";
+import { getDashboardTemplateMeta } from "@/lib/dashboard-templates";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, LabelList,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -172,6 +173,9 @@ const fmt = (v: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
 const fmtPct = (v: number) => `${(v * 100).toFixed(2)}%`;
 const fmtPctCompact = (v: number) => `${(v * 100).toFixed(1)}%`;
+const getResultadoColor = (v: number) => (toNum(v) >= 0 ? PALETTE.verde : PALETTE.vermelho);
+const getResultadoNome = (v: number) => (toNum(v) >= 0 ? "Lucro" : "Prejuizo");
+const getResultadoPercentualNome = (v: number) => (toNum(v) >= 0 ? "% Lucratividade" : "% Prejuizo");
 const fmtCompactNumber = (v: number) => {
   const valor = toNum(v);
   const abs = Math.abs(valor);
@@ -363,7 +367,7 @@ const CHART_THEME = {
   axisX: { tick: { fill: PALETTE.textoSec, fontSize: 12 }, axisLine: { stroke: PALETTE.borda }, tickLine: { stroke: PALETTE.borda } },
   axisY: { tick: { fill: PALETTE.textoSec, fontSize: 11 }, axisLine: { stroke: PALETTE.borda }, tickLine: { stroke: PALETTE.borda } },
   axisCategory: { tick: { fill: PALETTE.texto, fontSize: 11 }, axisLine: { stroke: PALETTE.borda }, tickLine: { stroke: PALETTE.borda } },
-  axisPercent: { tick: { fill: PALETTE.laranja, fontSize: 11 }, axisLine: { stroke: PALETTE.borda }, tickLine: { stroke: PALETTE.borda } },
+  axisPercent: { tick: { fill: PALETTE.textoSec, fontSize: 11 }, axisLine: { stroke: PALETTE.borda }, tickLine: { stroke: PALETTE.borda } },
   legend: { color: PALETTE.textoSec, fontSize: 12 },
   barRadiusTop: [4, 4, 0, 0] as [number, number, number, number],
   barRadiusSide: [0, 4, 4, 0] as [number, number, number, number],
@@ -446,6 +450,21 @@ const LabelBarTopValue = ({ x = 0, y = 0, width = 0, value = 0, formatter = fmtC
     {formatter(toNum(value))}
   </text>
 );
+const LabelResultadoTopValue = ({ x = 0, y = 0, width = 0, value = 0, formatter = fmtCompactMoney }: any) => (
+  <text
+    x={x + width / 2}
+    y={y - 8}
+    fill={getResultadoColor(toNum(value))}
+    fontSize={10}
+    fontWeight={700}
+    textAnchor="middle"
+    stroke={PALETTE.card}
+    strokeWidth={3}
+    paintOrder="stroke"
+  >
+    {formatter(toNum(value))}
+  </text>
+);
 const LabelLineValue = ({ x = 0, y = 0, value = 0, formatter = fmtPctCompact, color = PALETTE.laranja }: any) => (
   <text
     x={x}
@@ -460,6 +479,31 @@ const LabelLineValue = ({ x = 0, y = 0, value = 0, formatter = fmtPctCompact, co
   >
     {formatter(toNum(value))}
   </text>
+);
+const LabelLineResultadoValue = ({ x = 0, y = 0, value = 0, formatter = fmtPctCompact }: any) => (
+  <text
+    x={x}
+    y={y - 12}
+    fill={getResultadoColor(toNum(value))}
+    fontSize={10}
+    fontWeight={800}
+    textAnchor="middle"
+    stroke={PALETTE.card}
+    strokeWidth={3}
+    paintOrder="stroke"
+  >
+    {formatter(toNum(value))}
+  </text>
+);
+const DotLineResultado = ({ cx = 0, cy = 0, value = 0 }: any) => (
+  <circle
+    cx={cx}
+    cy={cy}
+    r={5}
+    fill={getResultadoColor(toNum(value))}
+    stroke={PALETTE.card}
+    strokeWidth={2}
+  />
 );
 
 /** Rótulos externos no gráfico de pizza (Custos): nome, valor e %. */
@@ -514,17 +558,27 @@ const TooltipCustom = ({ active, payload, label }: any) => {
       <p style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 6 }}>{label}</p>
       {payload.map((p: any, i: number) => (
         <p key={i} style={{ color: p.color, fontSize: 13, fontWeight: 600 }}>
-          {p.name}: {(() => {
+          {(() => {
             const value = toNum(p.value);
-            if (percentKeys.has(String(p.dataKey))) return fmtPct(value);
-            if (countKeys.has(String(p.dataKey))) return `${Math.round(value)}`;
-            return fmtK(value);
+            const dataKey = String(p.dataKey || '');
+            const resolvedName =
+              dataKey === 'lucro'
+                ? getResultadoNome(value)
+                : dataKey === 'lucroPct'
+                  ? getResultadoPercentualNome(value)
+                  : p.name;
+            const resolvedValue = percentKeys.has(dataKey)
+              ? fmtPct(value)
+              : countKeys.has(dataKey)
+                ? `${Math.round(value)}`
+                : fmtK(value);
+            return `${resolvedName}: ${resolvedValue}`;
           })()}
         </p>
       ))}
       {typeof margemLucro === "number" && (
         <p style={{ color: PALETTE.textoSec, fontSize: 12, fontWeight: 700, marginTop: 6 }}>
-          % Lucro: {fmtPct(margemLucro)}
+          {getResultadoPercentualNome(margemLucro)}: {fmtPct(margemLucro)}
         </p>
       )}
     </div>
@@ -1056,6 +1110,11 @@ function DashboardContent() {
     const unidadesPrejuizo = [...unidades].filter((u:any) => u.lucro < 0).map(u => ({...u, prejuizoPct: Math.abs(u.margem)})).sort((a:any,b:any) => b.prejuizoPct - a.prejuizoPct);
     const monthOptions = getMonthOptionsFromSeries(mesesFull);
     const comparativoNegativas = buildNegativeUnitsComparison(unidadesFull, mesesFull, monthFilters.visaoGeral || undefined);
+    const mesesResultado = meses.map((item: any) => ({
+      ...item,
+      lucroPositivo: toNum(item.lucro) >= 0 ? toNum(item.lucro) : null,
+      prejuizo: toNum(item.lucro) < 0 ? toNum(item.lucro) : null,
+    }));
 
     return (
     <>
@@ -1090,14 +1149,45 @@ function DashboardContent() {
         ))}
       </div>
 
+        <div style={{ ...s.card, marginBottom: 16 }}>
+          <div style={s.titulo}>Evolucao Mensal do Percentual de Lucratividade</div>
+        <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 14 }}>
+          Linha mensal da lucratividade quando positiva e do prejuizo quando negativa no periodo selecionado.
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={mesesResultado} margin={{ top: 12, right: 14, bottom: 6, left: 4 }}>
+            <CartesianGrid {...CHART_THEME.gridVertical} />
+            <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
+            <YAxis
+              domain={getPercentDomain(mesesResultado, 'lucroPct')}
+              tickFormatter={fmtPct}
+              {...CHART_THEME.axisPercent}
+            />
+            {chartTooltip}
+            <Legend wrapperStyle={CHART_THEME.legend} />
+            <Line
+              type="monotone"
+              dataKey="lucroPct"
+              name="% Resultado"
+              stroke={PALETTE.laranja}
+              strokeWidth={3}
+              dot={<DotLineResultado />}
+              activeDot={{ ...CHART_THEME.line.activeDot, fill: PALETTE.laranja, r: 6 }}
+              label={<LabelLineResultadoValue formatter={fmtPctCompact} />}
+              connectNulls
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
       <div style={s.row}>
         <div style={{ ...s.card, flex: 2, minWidth: 320 }}>
           <div style={s.titulo}>Evolucao Mensal</div>
           <ResponsiveContainer width="100%" height={240}>
-            <ComposedChart data={meses} barGap={4} margin={{ top: 22, right: 10, bottom: 6, left: 0 }}>
+            <ComposedChart data={mesesResultado} barGap={4} margin={{ top: 22, right: 10, bottom: 6, left: 0 }}>
               <CartesianGrid {...CHART_THEME.grid} />
               <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
-              <YAxis yAxisId="valor" domain={getMoneyDomain(meses, ['receita', 'despesa', 'lucro'])} tickFormatter={v => `R$${(v/1000).toFixed(0)}K`} {...CHART_THEME.axisY} />
+              <YAxis yAxisId="valor" domain={getMoneyDomain(mesesResultado, ['receita', 'despesa', 'lucro'])} tickFormatter={v => `R$${(v/1000).toFixed(0)}K`} {...CHART_THEME.axisY} />
               <YAxis yAxisId="percentual" orientation="right" tickFormatter={fmtPct} {...CHART_THEME.axisPercent} />
               {chartTooltip}
               <Legend wrapperStyle={CHART_THEME.legend} />
@@ -1112,10 +1202,24 @@ function DashboardContent() {
                   <LabelList dataKey={k.toLowerCase()} content={<LabelBarTopValue formatter={fmtCompactMoney} color={CORES_UNIDADES[(i + 3) % CORES_UNIDADES.length]} />} />
                 </Bar>
               ))}
-              <Bar yAxisId="valor" dataKey="lucro" name="Lucro" fill={PALETTE.azul} radius={CHART_THEME.barRadiusTop}>
-                <LabelList dataKey="lucro" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.azul} />} />
+              <Bar yAxisId="valor" dataKey="lucroPositivo" name="Lucro" fill={PALETTE.verde} radius={CHART_THEME.barRadiusTop}>
+                <LabelList dataKey="lucroPositivo" content={<LabelResultadoTopValue formatter={fmtCompactMoney} />} />
               </Bar>
-              <Line yAxisId="percentual" type="monotone" dataKey="lucroPct" name="% Lucro" stroke={PALETTE.laranja} strokeWidth={CHART_THEME.line.strokeWidth} dot={{ ...CHART_THEME.line.dot, fill: PALETTE.laranja, r: 4 }} activeDot={{ ...CHART_THEME.line.activeDot, r: 6 }} label={<LabelLineValue formatter={fmtPctCompact} color={PALETTE.laranja} />} />
+              <Bar yAxisId="valor" dataKey="prejuizo" name="Prejuizo" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusTop}>
+                <LabelList dataKey="prejuizo" content={<LabelResultadoTopValue formatter={fmtCompactMoney} />} />
+              </Bar>
+              <Line
+                yAxisId="percentual"
+                type="monotone"
+                dataKey="lucroPct"
+                name="% Resultado"
+                stroke={PALETTE.laranja}
+                {...CHART_THEME.line}
+                dot={<DotLineResultado />}
+                activeDot={{ ...CHART_THEME.line.activeDot, fill: PALETTE.laranja }}
+                label={<LabelLineResultadoValue formatter={fmtPctCompact} />}
+                connectNulls
+              />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -1148,9 +1252,9 @@ function DashboardContent() {
                 </div>
                 <div style={{ fontSize: 11, color: PALETTE.textoSec, marginTop: 3, display: "flex", justifyContent: "space-between", gap: 8 }}>
                   <span>Desp/Rec: {fmtPct(pct)}</span>
-                  <span>% Lucro: {fmtPct(lucroPct)}</span>
+                    <span>{ok ? "% Lucratividade" : "% Prejuizo"}: {fmtPct(lucroPct)}</span>
+                  </div>
                 </div>
-              </div>
             );
           })}
         </div>
@@ -1310,7 +1414,7 @@ function DashboardContent() {
       receita: number;
       despesa: number;
       lucro: number;
-      /** lucro ÷ receita no mês; null se não houver receita */
+      /** resultado ÷ receita no mês; null se não houver receita */
       pctLucroSobreRec: number | null;
     };
     type DetalhamentoGestoraRow = {
@@ -1379,6 +1483,13 @@ function DashboardContent() {
       : possuiFiltroGestora
         ? (gestoraSelecionada?.monthly || [])
         : buildMonthlySeries(gestorasBase);
+    const monthlyExibidoResultado = monthlyExibido.map((item: any) => ({
+      ...item,
+      lucroPositivo: toNum(item.lucro) >= 0 ? toNum(item.lucro) : null,
+      prejuizo: toNum(item.lucro) < 0 ? toNum(item.lucro) : null,
+      lucratividadePct: toNum(item.lucroPct) >= 0 ? toNum(item.lucroPct) : null,
+      prejuizoPctLinha: toNum(item.lucroPct) < 0 ? toNum(item.lucroPct) : null,
+    }));
     const monthOptions = getMonthOptionsFromSeries(buildMonthlySeries(gestorasBaseFull));
     const monthFilterPorGestoras = monthFilters.porGestoras || "";
     const estiloColunaTotalGestDet = {
@@ -1526,11 +1637,11 @@ function DashboardContent() {
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={320}>
-              <ComposedChart data={monthlyExibido} barGap={4}>
+              <ComposedChart data={monthlyExibidoResultado} barGap={4}>
                 <CartesianGrid {...CHART_THEME.grid} />
                 <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
                 <YAxis yAxisId="valor" tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                <YAxis yAxisId="percentual" orientation="right" domain={getPercentDomain(monthlyExibido, 'lucroPct')} tickFormatter={fmtPct} {...CHART_THEME.axisPercent} />
+                <YAxis yAxisId="percentual" orientation="right" domain={getPercentDomain(monthlyExibidoResultado, 'lucroPct')} tickFormatter={fmtPct} {...CHART_THEME.axisPercent} />
                 {chartTooltip}
                 <Legend wrapperStyle={CHART_THEME.legend} />
                 <Bar yAxisId="valor" dataKey="receita" name="Receita" fill={PALETTE.azul} radius={CHART_THEME.barRadiusTop}>
@@ -1539,10 +1650,13 @@ function DashboardContent() {
                 <Bar yAxisId="valor" dataKey="despesa" name="Despesa" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusTop}>
                   <LabelList dataKey="despesa" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.vermelho} />} />
                 </Bar>
-                <Bar yAxisId="valor" dataKey="lucro" name="Resultado" fill={PALETTE.verde} radius={CHART_THEME.barRadiusTop}>
-                  <LabelList dataKey="lucro" content={<LabelBarTopValue formatter={fmtCompactMoney} color={PALETTE.verde} />} />
+                <Bar yAxisId="valor" dataKey="lucroPositivo" name="Lucro" fill={PALETTE.verde} radius={CHART_THEME.barRadiusTop}>
+                  <LabelList dataKey="lucroPositivo" content={<LabelResultadoTopValue formatter={fmtCompactMoney} />} />
                 </Bar>
-                <Line yAxisId="percentual" type="monotone" dataKey="lucroPct" name="% Lucro" stroke={PALETTE.laranja} {...CHART_THEME.line} dot={{ ...CHART_THEME.line.dot, fill: PALETTE.laranja }} activeDot={{ ...CHART_THEME.line.activeDot }} label={<LabelLineValue formatter={fmtPctCompact} color={PALETTE.laranja} />} />
+                <Bar yAxisId="valor" dataKey="prejuizo" name="Prejuizo" fill={PALETTE.vermelho} radius={CHART_THEME.barRadiusTop}>
+                  <LabelList dataKey="prejuizo" content={<LabelResultadoTopValue formatter={fmtCompactMoney} />} />
+                </Bar>
+              <Line yAxisId="percentual" type="monotone" dataKey="lucroPct" name="% Resultado" stroke={PALETTE.laranja} {...CHART_THEME.line} dot={<DotLineResultado />} activeDot={{ ...CHART_THEME.line.activeDot, fill: PALETTE.laranja }} label={<LabelLineResultadoValue formatter={fmtPctCompact} />} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
           )}
@@ -1551,8 +1665,8 @@ function DashboardContent() {
         <div style={s.card}>
           <div style={s.titulo}>{unidadeSelecionada ? "DETALHAMENTO DA UNIDADE SELECIONADA" : gestoraSelecionada ? "DETALHAMENTO DAS UNIDADES DA GESTORA" : "DETALHAMENTO POR GESTORA"}</div>
           <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 14 }}>
-            Por mês: receita, despesas e resultado (lucro). Cada gestora fica em um bloco separado por linha grossa.
-            Na linha Resultado, abaixo de cada valor mensal aparece a margem do mês (lucro ÷ receita). Em Total período,
+            Por mês: receita, despesas e resultado. Cada gestora fica em um bloco separado por linha grossa.
+            Na linha Resultado, abaixo de cada valor mensal aparece a margem do mês (resultado ÷ receita). Em Total período,
             o total e a margem do período vêm empilhados.
           </div>
           {detalhamentoMensalGestorasRows.length === 0 ? (
@@ -2411,7 +2525,7 @@ function DashboardContent() {
       <div style={s.card}>
         <div style={s.titulo}>COMPARATIVO MENSAL DAS UNIDADES</div>
         <div style={{ color: PALETTE.textoSec, fontSize: 12, marginBottom: 14 }}>
-          Resultado (lucro) por mês no período filtrado; percentual = resultado ÷ receita no período.
+          Resultado por mês no período filtrado; percentual = resultado ÷ receita no período.
         </div>
         {comparativoMensalUnidadesRows.length === 0 ? (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, color: PALETTE.textoSec, fontSize: 14 }}>
@@ -2591,38 +2705,6 @@ function DashboardContent() {
                     );
                   })}
                 </div>
-                <div style={{ width: "100%", minWidth: 0 }}>
-                  <ResponsiveContainer width="100%" height={380}>
-                    <BarChart
-                      data={unit.monthlyRows}
-                      barCategoryGap="10%"
-                      barGap={3}
-                      margin={{ top: 18, right: 18, bottom: 44, left: 0 }}
-                    >
-                      <CartesianGrid {...CHART_THEME.gridVertical} />
-                      <XAxis dataKey="mesLabel" {...CHART_THEME.axisX} />
-                      <YAxis tickFormatter={fmtAxisMoney} {...CHART_THEME.axisY} />
-                      {chartTooltip}
-                      <Legend
-                        wrapperStyle={{ ...CHART_THEME.legend, fontSize: 11, paddingTop: 18 }}
-                      />
-                      {unit.categorias.map((categoria: string, index: number) => (
-                        <Bar
-                          key={`${unit.nome}-${categoria}`}
-                          dataKey={categoria}
-                          name={categoria}
-                          fill={
-                            [PALETTE.vermelho, PALETTE.laranja, PALETTE.azul, PALETTE.roxo, PALETTE.rosa, PALETTE.cinza, PALETTE.verde][
-                              index % 7
-                            ]
-                          }
-                          radius={CHART_THEME.barRadiusTop}
-                          maxBarSize={24}
-                        />
-                      ))}
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
               </div>
             ))}
           </div>
@@ -2634,6 +2716,7 @@ function DashboardContent() {
 
   const abas = [AbaVisaoGeral, AbaPorGestoras, AbaEvolutivos, AbaCustos, AbaPessoas];
   const AbaAtual = abas[aba];
+  const activeTemplateMeta = getDashboardTemplateMeta(dashboardMeta?.template);
 
   return (
     <div style={s.page}>
@@ -2644,6 +2727,12 @@ function DashboardContent() {
           <div style={{ color: PALETTE.textoSec, fontSize: 12, marginTop: 4 }}>
             Visualizacao padronizada - {unidades.length} unidades
             {dashboardMeta?.owner?.name ? ` - Proprietario: ${dashboardMeta.owner.name}` : ''}
+          </div>
+          <div style={{ display: "inline-flex", alignItems: "center", marginTop: 8, borderRadius: 999, border: `1px solid ${PALETTE.verde}33`, background: `${PALETTE.verde}12`, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: PALETTE.verde, letterSpacing: 0.4, textTransform: "uppercase" }}>
+            Modelo {activeTemplateMeta.label}
+          </div>
+          <div style={{ color: PALETTE.textoSec, fontSize: 11, marginTop: 6, maxWidth: 620 }}>
+            {dashboardMeta?.templateMeta?.importHint || activeTemplateMeta.description}
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -2919,5 +3008,3 @@ export default function Dashboard() {
     </Suspense>
   );
 }
-
-

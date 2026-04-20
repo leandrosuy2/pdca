@@ -1,12 +1,12 @@
 'use client';
 
 import { getUsersApiUrl } from '@/lib/api-url';
+import { DASHBOARD_TEMPLATE_OPTIONS, getDashboardTemplateMeta } from '@/lib/dashboard-templates';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import Cookies from 'js-cookie';
-import { Plus, Shield, Trash2, User } from 'lucide-react';
-
+import { AlertTriangle, Plus, Shield, Trash2, User, X } from 'lucide-react';
 
 const decodeToken = (token: string) => {
   try {
@@ -23,12 +23,15 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [clearingUserId, setClearingUserId] = useState('');
+  const [deletingUserId, setDeletingUserId] = useState('');
+  const [deleteModalUser, setDeleteModalUser] = useState<any | null>(null);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
     name: '',
     email: '',
     password: '',
     role: 'USER',
+    template: 'RESTAURANTE',
     active: true,
   });
 
@@ -53,7 +56,7 @@ export default function AdminUsersPage() {
         });
         setUsers(response.data.users || []);
       } catch (err: any) {
-        setError(err.response?.data?.message || 'Não foi possível carregar os usuários.');
+        setError(err.response?.data?.message || 'Nao foi possivel carregar os usuarios.');
       } finally {
         setLoading(false);
       }
@@ -78,17 +81,20 @@ export default function AdminUsersPage() {
         email: '',
         password: '',
         role: 'USER',
+        template: 'RESTAURANTE',
         active: true,
       });
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Não foi possível criar o usuário.');
+      setError(err.response?.data?.message || 'Nao foi possivel criar o usuario.');
     } finally {
       setSaving(false);
     }
   };
 
   const handleClearDashboardData = async (user: any) => {
-    const confirmed = window.confirm(`Deseja limpar os dados do dashboard do usuário ${user.name}? Essa ação remove transações, unidades e categorias desse usuário.`);
+    const confirmed = window.confirm(
+      `Deseja limpar os dados do dashboard do usuario ${user.name}? Essa acao remove transacoes, unidades e categorias desse usuario.`,
+    );
     if (!confirmed) return;
 
     setClearingUserId(user.id);
@@ -99,14 +105,44 @@ export default function AdminUsersPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Não foi possível limpar os dados do dashboard.');
+      setError(err.response?.data?.message || 'Nao foi possivel limpar os dados do dashboard.');
     } finally {
       setClearingUserId('');
     }
   };
 
+  const openDeleteModal = (user: any) => {
+    setError('');
+    setDeleteModalUser(user);
+  };
+
+  const closeDeleteModal = () => {
+    if (deletingUserId) return;
+    setDeleteModalUser(null);
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deleteModalUser) return;
+
+    setDeletingUserId(deleteModalUser.id);
+    setError('');
+
+    try {
+      await axios.delete(`${getUsersApiUrl()}/${deleteModalUser.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setUsers((prev) => prev.filter((item) => item.id !== deleteModalUser.id));
+      setDeleteModalUser(null);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Nao foi possivel excluir o usuario.');
+    } finally {
+      setDeletingUserId('');
+    }
+  };
+
   if (loading) {
-    return <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">Carregando usuários...</div>;
+    return <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">Carregando usuarios...</div>;
   }
 
   return (
@@ -116,11 +152,11 @@ export default function AdminUsersPage() {
           <div className="mb-6 space-y-2">
             <div className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-primary">
               <Plus size={14} />
-              Novo Usuário
+              Novo Usuario
             </div>
             <h1 className="text-2xl font-bold tracking-tight">Cadastro administrativo</h1>
             <p className="text-sm text-muted-foreground">
-              Crie usuários com perfil `USER` ou `ADMIN`. O controle de acesso é validado no backend.
+              Crie usuarios com perfil `USER` ou `ADMIN` e ja atribua o modelo base do dashboard ao perfil.
             </p>
           </div>
 
@@ -173,7 +209,7 @@ export default function AdminUsersPage() {
                   onChange={(e) => setForm((prev) => ({ ...prev, role: e.target.value }))}
                   className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
                 >
-                  <option value="USER">Usuário</option>
+                  <option value="USER">Usuario</option>
                   <option value="ADMIN">Administrador</option>
                 </select>
               </div>
@@ -194,13 +230,29 @@ export default function AdminUsersPage() {
               </div>
             </div>
 
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Modelo do dashboard</label>
+              <select
+                value={form.template}
+                onChange={(e) => setForm((prev) => ({ ...prev, template: e.target.value }))}
+                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              >
+                {DASHBOARD_TEMPLATE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">{getDashboardTemplateMeta(form.template).description}</p>
+            </div>
+
             <button
               type="submit"
               disabled={saving}
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-70"
             >
               <Plus size={16} />
-              {saving ? 'Criando usuário...' : 'Criar usuário'}
+              {saving ? 'Criando usuario...' : 'Criar usuario'}
             </button>
           </form>
         </div>
@@ -208,19 +260,19 @@ export default function AdminUsersPage() {
         <div className="rounded-2xl border border-border bg-card p-6">
           <div className="mb-6 flex items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl font-bold tracking-tight">Usuários cadastrados</h2>
-              <p className="text-sm text-muted-foreground">Visão administrativa dos perfis criados no sistema.</p>
+              <h2 className="text-xl font-bold tracking-tight">Usuarios cadastrados</h2>
+              <p className="text-sm text-muted-foreground">Visao administrativa dos perfis criados no sistema.</p>
             </div>
             <div className="rounded-xl border border-border bg-background px-4 py-2 text-sm text-muted-foreground">
-              {users.length} usuário(s)
+              {users.length} usuario(s)
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] border-collapse text-sm">
+            <table className="w-full min-w-[820px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-border">
-                  {['Usuário', 'E-mail', 'Perfil', 'Status', 'Criado em', 'Ações'].map((header) => (
+                  {['Usuario', 'E-mail', 'Perfil', 'Modelo', 'Status', 'Criado em', 'Acoes'].map((header) => (
                     <th key={header} className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
                       {header}
                     </th>
@@ -228,47 +280,139 @@ export default function AdminUsersPage() {
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
-                  <tr key={user.id} className="border-b border-border/60">
-                    <td className="px-3 py-4 font-medium text-foreground">{user.name}</td>
-                    <td className="px-3 py-4 text-muted-foreground">{user.email}</td>
-                    <td className="px-3 py-4">
-                      <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${
-                        user.role === 'ADMIN'
-                          ? 'bg-primary/10 text-primary'
-                          : 'bg-secondary text-secondary-foreground'
-                      }`}>
-                        {user.role === 'ADMIN' ? <Shield size={12} /> : <User size={12} />}
-                        {user.role}
-                      </span>
-                    </td>
-                    <td className="px-3 py-4">
-                      <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                        user.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-500/10 text-zinc-400'
-                      }`}>
-                        {user.active ? 'Ativo' : 'Inativo'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-4 text-muted-foreground">
-                      {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(user.createdAt))}
-                    </td>
-                    <td className="px-3 py-4">
-                      <button
-                        onClick={() => handleClearDashboardData(user)}
-                        disabled={clearingUserId === user.id}
-                        className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive transition hover:bg-destructive/15 disabled:opacity-60"
-                      >
-                        <Trash2 size={14} />
-                        {clearingUserId === user.id ? 'Limpando...' : 'Limpar dados'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {users.map((user) => {
+                  const isCurrentUser = String(currentUser?.sub || currentUser?.id || '') === String(user.id);
+                  const templateMeta = getDashboardTemplateMeta(user.template);
+
+                  return (
+                    <tr key={user.id} className="border-b border-border/60">
+                      <td className="px-3 py-4 font-medium text-foreground">{user.name}</td>
+                      <td className="px-3 py-4 text-muted-foreground">{user.email}</td>
+                      <td className="px-3 py-4">
+                        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${
+                          user.role === 'ADMIN'
+                            ? 'bg-primary/10 text-primary'
+                            : 'bg-secondary text-secondary-foreground'
+                        }`}>
+                          {user.role === 'ADMIN' ? <Shield size={12} /> : <User size={12} />}
+                          {user.role}
+                        </span>
+                      </td>
+                      <td className="px-3 py-4">
+                        <span className="inline-flex rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold text-foreground">
+                          {templateMeta.label}
+                        </span>
+                      </td>
+                      <td className="px-3 py-4">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+                          user.active ? 'bg-emerald-500/10 text-emerald-400' : 'bg-zinc-500/10 text-zinc-400'
+                        }`}>
+                          {user.active ? 'Ativo' : 'Inativo'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-4 text-muted-foreground">
+                        {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(user.createdAt))}
+                      </td>
+                      <td className="px-3 py-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => handleClearDashboardData(user)}
+                            disabled={clearingUserId === user.id}
+                            className="inline-flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-semibold text-destructive transition hover:bg-destructive/15 disabled:opacity-60"
+                          >
+                            <Trash2 size={14} />
+                            {clearingUserId === user.id ? 'Limpando...' : 'Limpar dados'}
+                          </button>
+                          <button
+                            onClick={() => openDeleteModal(user)}
+                            disabled={isCurrentUser || deletingUserId === user.id}
+                            className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-500 transition hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={isCurrentUser ? 'Voce nao pode excluir seu proprio usuario' : 'Excluir usuario'}
+                          >
+                            <Trash2 size={14} />
+                            {deletingUserId === user.id ? 'Excluindo...' : 'Excluir usuario'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       </section>
+
+      {deleteModalUser ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-user-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            closeDeleteModal();
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl border border-border bg-card p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-red-500/20 bg-red-500/10 text-red-500">
+                  <AlertTriangle size={22} />
+                </div>
+                <div>
+                  <h2 id="delete-user-modal-title" className="text-lg font-bold text-foreground">
+                    Excluir usuario por completo
+                  </h2>
+                  <p className="text-sm text-muted-foreground">Essa acao nao pode ser desfeita.</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={Boolean(deletingUserId)}
+                className="rounded-full border border-border p-2 text-muted-foreground transition hover:bg-muted disabled:opacity-50"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-foreground">
+              <p className="font-semibold">
+                O usuario <span className="text-red-500">{deleteModalUser.name}</span> sera excluido por completo.
+              </p>
+              <p className="mt-2 text-muted-foreground">
+                Isso remove tambem os dashboards, templates, acessos, transacoes, unidades, categorias e demais dados vinculados a esse usuario.
+              </p>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={Boolean(deletingUserId)}
+                className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteUser}
+                disabled={Boolean(deletingUserId)}
+                className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+              >
+                <Trash2 size={16} />
+                {deletingUserId ? 'Excluindo usuario...' : 'Confirmar exclusao'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

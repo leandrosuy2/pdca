@@ -3,6 +3,27 @@ import * as xlsx from 'xlsx';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { BadRequestException } from '@nestjs/common';
 import { buildDynamicKpis } from './kpi-builder';
+import {
+  DASHBOARD_TEMPLATE_DEFINITIONS,
+  type DashboardTemplateCode,
+  normalizeDashboardTemplate,
+} from './dashboard-templates';
+
+type OverviewTransaction = {
+  type?: string | null;
+  amount?: number | null;
+};
+
+type ParsedImportRow = {
+  unidadeName: string;
+  amount: number;
+  date: Date;
+  tipo: string;
+  catName: string;
+  descr: string;
+  gestora: string;
+  qtdFunc: number | null;
+};
 
 @Injectable()
 export class DashboardService {
@@ -129,6 +150,19 @@ export class DashboardService {
     );
   }
 
+  private getDashboardTemplate(template: unknown): DashboardTemplateCode {
+    return normalizeDashboardTemplate(template);
+  }
+
+  private enrichDashboardTemplate<T extends { template?: unknown }>(dashboard: T) {
+    const template = this.getDashboardTemplate(dashboard?.template);
+    return {
+      ...dashboard,
+      template,
+      templateMeta: DASHBOARD_TEMPLATE_DEFINITIONS[template],
+    };
+  }
+
   private async ensureDefaultDashboard(user: any) {
     const existing = await this.prisma.dashboard.findFirst({
       where: { ownerId: user.id, isDefault: true }
@@ -147,6 +181,7 @@ export class DashboardService {
         slug: slugBase,
         description: 'Dashboard principal do usuario',
         ownerId: user.id,
+        template: this.getDashboardTemplate(user.template),
         isDefault: true,
       }
     });
@@ -154,7 +189,7 @@ export class DashboardService {
 
   private async ensureDefaultDashboardsForAllUsers() {
     const users = await this.prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, active: true }
+      select: { id: true, name: true, email: true, role: true, template: true, active: true }
     });
 
     for (const user of users) {
@@ -165,7 +200,7 @@ export class DashboardService {
   private async resolveDashboardContext(user: any, dashboardId?: string) {
     if (!dashboardId) {
       const dashboard = await this.ensureDefaultDashboard(user);
-      return { dashboard, scopedUserId: dashboard.ownerId };
+      return { dashboard: this.enrichDashboardTemplate(dashboard), scopedUserId: dashboard.ownerId };
     }
 
     const dashboard = await this.prisma.dashboard.findUnique({
@@ -187,17 +222,27 @@ export class DashboardService {
       throw new ForbiddenException('Voce nao tem permissao para acessar este dashboard.');
     }
 
-    return { dashboard, scopedUserId: dashboard.ownerId };
+    return { dashboard: this.enrichDashboardTemplate(dashboard), scopedUserId: dashboard.ownerId };
   }
 
   async listDashboards(user: any) {
     if (this.isAdminUser(user)) {
       await this.ensureDefaultDashboardsForAllUsers();
       const dashboards = await this.prisma.dashboard.findMany({
-        include: { owner: { select: { id: true, name: true, email: true, role: true } } },
+        include: { owner: { select: { id: true, name: true, email: true, role: true, template: true } } },
         orderBy: [{ owner: { name: 'asc' } }, { name: 'asc' }]
       });
-      return { dashboards };
+      return {
+        dashboards: dashboards.map((dashboard) => ({
+          ...this.enrichDashboardTemplate(dashboard),
+          owner: dashboard.owner
+            ? {
+                ...dashboard.owner,
+                template: this.getDashboardTemplate(dashboard.owner.template),
+              }
+            : dashboard.owner,
+        })),
+      };
     }
 
     await this.ensureDefaultDashboard(user);
@@ -209,16 +254,26 @@ export class DashboardService {
           { access: { some: { userId: user.id } } }
         ]
       },
-      include: { owner: { select: { id: true, name: true, email: true, role: true } } },
+      include: { owner: { select: { id: true, name: true, email: true, role: true, template: true } } },
       orderBy: [{ owner: { name: 'asc' } }, { name: 'asc' }]
     });
 
-    return { dashboards };
+    return {
+      dashboards: dashboards.map((dashboard) => ({
+        ...this.enrichDashboardTemplate(dashboard),
+        owner: dashboard.owner
+          ? {
+              ...dashboard.owner,
+              template: this.getDashboardTemplate(dashboard.owner.template),
+            }
+          : dashboard.owner,
+      })),
+    };
   }
 
   async getDashboardMeta(user: any, dashboardId: string) {
     const { dashboard } = await this.resolveDashboardContext(user, dashboardId);
-    return dashboard;
+    return this.enrichDashboardTemplate(dashboard);
   }
 
   async getOverview(user: any, dashboardId?: string, month?: string) {
@@ -228,7 +283,7 @@ export class DashboardService {
       include: { categoria: true, unidade: true }
     });
 
-    const typeKpis = buildDynamicKpis({
+    const typeKpis = buildDynamicKpis<OverviewTransaction>({
       items: transactions,
       bucketSelector: (t) => String(t.type || ''),
       valueSelector: (t) => Number(t.amount || 0),
@@ -636,6 +691,8 @@ export class DashboardService {
     const { dashboard } = await this.resolveDashboardContext(user, dashboardId);
     const isAdmin = this.isAdminUser(user);
     const canImport = isAdmin || dashboard.ownerId === user.id;
+    const template = this.getDashboardTemplate(dashboard.template);
+    const templateDefinition = DASHBOARD_TEMPLATE_DEFINITIONS[template];
 
     if (!canImport) {
       throw new ForbiddenException('Voce nao tem permissao para importar neste dashboard.');
@@ -652,16 +709,7 @@ export class DashboardService {
 
     const data: any[] = xlsx.utils.sheet_to_json(sheet, { defval: '' });
 
-    const MODEL_ALIASES = {
-      month: ['MES', 'MÊS', 'COMPETENCIA', 'COMPETÊNCIA', 'PERIODO', 'PERÍODO', 'DATA', 'MES_ANO', 'MÊS/ANO'],
-      unit: ['UNIDADE', 'UNID', 'CENTRO DE CUSTO'],
-      value: ['VALOR', 'VALOR TOTAL', 'VLR', 'VLR_TOTAL'],
-      type: ['TIPO', 'TIPO_LANCAMENTO'],
-      category: ['DEFINICAO', 'DEFINIÇÃO', 'CATEGORIA', 'NATUREZA'],
-      manager: ['GESTORA', 'GESTOR', 'RESPONSAVEL', 'RESPONSÁVEL'],
-      year: ['ANO', 'EXERCICIO', 'EXERCÍCIO', 'DATA'],
-      headcount: ['QTD FUNC', 'QTD_FUNC', 'QTD FUNCIONARIOS', 'QTD_FUNCIONARIOS', 'QTD'],
-    } as const;
+    const MODEL_ALIASES = templateDefinition.aliases;
 
     const normalizeHeader = (value: string) =>
       String(value || '')
@@ -1159,19 +1207,22 @@ export class DashboardService {
         })
         .filter((row): row is NonNullable<typeof row> => Boolean(row));
 
-    let structuredRows = [
-      ...parseStructuredDespesasSheet(),
-      ...parseStructuredFaturamentoSheet(),
-      ...parseStructuredSalariosSheet(),
-    ];
-
-    if (structuredRows.length === 0 && workbook.SheetNames.length >= 3) {
-      const [n0, n1, n2] = workbook.SheetNames;
+    let structuredRows: ParsedImportRow[] = [];
+    if (templateDefinition.supportsStructuredSheets) {
       structuredRows = [
-        ...parseStructuredFaturamentoSheet(n0),
-        ...parseStructuredDespesasSheet(n1),
-        ...parseStructuredSalariosSheet(n2, 'FOPEG'),
+        ...parseStructuredDespesasSheet(),
+        ...parseStructuredFaturamentoSheet(),
+        ...parseStructuredSalariosSheet(),
       ];
+
+      if (structuredRows.length === 0 && workbook.SheetNames.length >= 3) {
+        const [n0, n1, n2] = workbook.SheetNames;
+        structuredRows = [
+          ...parseStructuredFaturamentoSheet(n0),
+          ...parseStructuredDespesasSheet(n1),
+          ...parseStructuredSalariosSheet(n2, 'FOPEG'),
+        ];
+      }
     }
 
     let parsedRows =
@@ -1253,6 +1304,8 @@ export class DashboardService {
       totalImportado: parsedRows.length,
       dashboardId: targetDashboardId,
       ownerUserId: targetUserId,
+      template,
+      templateMeta: templateDefinition,
     };
   }
 
@@ -1357,9 +1410,9 @@ export class DashboardService {
       _sum: { amount: true },
     });
 
-    const curM = new Map(sumsCurrent.map((x) => [x.userId, Number(x._sum.amount || 0)]));
-    const prevM = new Map(sumsPrev.map((x) => [x.userId, Number(x._sum.amount || 0)]));
-    const desM = new Map(desCurrent.map((x) => [x.userId, Number(x._sum.amount || 0)]));
+    const curM = new Map<string, number>(sumsCurrent.map((x) => [x.userId, Number(x._sum.amount || 0)]));
+    const prevM = new Map<string, number>(sumsPrev.map((x) => [x.userId, Number(x._sum.amount || 0)]));
+    const desM = new Map<string, number>(desCurrent.map((x) => [x.userId, Number(x._sum.amount || 0)]));
 
     const ranking = users
       .map((u) => {
@@ -1458,4 +1511,3 @@ export class DashboardService {
     return { ...consolidated, ranking: ranking.ranking, quarters: quarterly.quarters, forecast };
   }
 }
-

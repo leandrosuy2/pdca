@@ -6,6 +6,10 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import {
+  DASHBOARD_TEMPLATE_DEFINITIONS,
+  normalizeDashboardTemplate,
+} from '../dashboard/dashboard-templates';
 
 @Injectable()
 export class UsersService {
@@ -26,6 +30,7 @@ export class UsersService {
         name: true,
         email: true,
         role: true,
+        template: true,
         active: true,
         createdAt: true,
         updatedAt: true,
@@ -45,6 +50,7 @@ export class UsersService {
         name: true,
         email: true,
         role: true,
+        template: true,
         active: true,
         createdAt: true,
         updatedAt: true,
@@ -59,7 +65,7 @@ export class UsersService {
       by: ['userId'],
       _max: { date: true },
     });
-    const lastMap = new Map(lastByUser.map((r) => [r.userId, r._max.date]));
+    const lastMap = new Map<string, Date | null>(lastByUser.map((r) => [r.userId, r._max.date]));
 
     const now = Date.now();
     const sevenDays = 7 * 24 * 60 * 60 * 1000;
@@ -69,19 +75,21 @@ export class UsersService {
       const lastActivityAt = lastTx ?? u.updatedAt;
       const recentWindow =
         lastActivityAt && now - new Date(lastActivityAt).getTime() <= sevenDays;
+      const template = normalizeDashboardTemplate(u.template);
 
       return {
         id: u.id,
         name: u.name,
         email: u.email,
         role: u.role,
+        template,
+        templateMeta: DASHBOARD_TEMPLATE_DEFINITIONS[template],
         active: u.active,
         createdAt: u.createdAt,
         updatedAt: u.updatedAt,
         transactionCount: u._count.transacoes,
         ownedDashboardCount: u._count.dashboards,
         lastActivityAt: lastTx ? lastTx.toISOString() : null,
-        /** Sem WebSocket: “pulso” = conta ativa e houve lançamento nos últimos 7 dias */
         recentActivity: Boolean(u.active && recentWindow),
       };
     });
@@ -99,6 +107,7 @@ export class UsersService {
         name: true,
         email: true,
         role: true,
+        template: true,
         active: true,
         createdAt: true,
         updatedAt: true,
@@ -115,7 +124,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException('Usuário não encontrado.');
+      throw new NotFoundException('Usuario nao encontrado.');
     }
 
     const [recentTransactions, dashboardsOwned, accessGrants] = await Promise.all([
@@ -136,7 +145,14 @@ export class UsersService {
       }),
       this.prisma.dashboard.findMany({
         where: { ownerId: userId },
-        select: { id: true, name: true, slug: true, isDefault: true, createdAt: true },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          isDefault: true,
+          createdAt: true,
+          template: true,
+        },
         orderBy: { name: 'asc' },
       }),
       this.prisma.dashboardAccess.findMany({
@@ -147,6 +163,7 @@ export class UsersService {
               id: true,
               name: true,
               slug: true,
+              template: true,
               owner: { select: { name: true, email: true } },
             },
           },
@@ -155,7 +172,10 @@ export class UsersService {
     ]);
 
     return {
-      user,
+      user: {
+        ...user,
+        templateMeta: DASHBOARD_TEMPLATE_DEFINITIONS[normalizeDashboardTemplate(user.template)],
+      },
       recentTransactions: recentTransactions.map((t) => ({
         ...t,
         date: t.date.toISOString(),
@@ -175,19 +195,20 @@ export class UsersService {
     const email = String(payload.email || '').trim().toLowerCase();
     const password = String(payload.password || '');
     const role = String(payload.role || 'USER').toUpperCase();
+    const template = normalizeDashboardTemplate(payload.template);
     const active = payload.active !== false;
 
     if (!name || !email || !password) {
-      throw new BadRequestException('Nome, e-mail e senha são obrigatórios.');
+      throw new BadRequestException('Nome, e-mail e senha sao obrigatorios.');
     }
 
     if (!['ADMIN', 'USER'].includes(role)) {
-      throw new BadRequestException('Perfil inválido. Use ADMIN ou USER.');
+      throw new BadRequestException('Perfil invalido. Use ADMIN ou USER.');
     }
 
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
-      throw new BadRequestException('Já existe um usuário com este e-mail.');
+      throw new BadRequestException('Ja existe um usuario com este e-mail.');
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -198,6 +219,7 @@ export class UsersService {
         email,
         password: passwordHash,
         role,
+        template,
         active,
       },
       select: {
@@ -205,6 +227,7 @@ export class UsersService {
         name: true,
         email: true,
         role: true,
+        template: true,
         active: true,
         createdAt: true,
         updatedAt: true,
@@ -223,7 +246,7 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new BadRequestException('Usuário não encontrado.');
+      throw new BadRequestException('Usuario nao encontrado.');
     }
 
     await this.prisma.transacao.deleteMany({ where: { userId } });
@@ -232,8 +255,55 @@ export class UsersService {
 
     return {
       success: true,
-      message: `Dados do dashboard do usuário ${user.name} foram limpos com sucesso.`,
+      message: `Dados do dashboard do usuario ${user.name} foram limpos com sucesso.`,
       user,
+    };
+  }
+
+  async deleteUser(currentUser: any, userId: string) {
+    this.ensureAdmin(currentUser);
+
+    if (String(currentUser?.id || currentUser?.sub || '') === String(userId)) {
+      throw new BadRequestException('Voce nao pode excluir o seu proprio usuario.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        _count: {
+          select: {
+            dashboards: true,
+            transacoes: true,
+            unidades: true,
+            categorias: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Usuario nao encontrado.');
+    }
+
+    await this.prisma.user.delete({
+      where: { id: userId },
+    });
+
+    return {
+      success: true,
+      message: `Usuario ${user.name} excluido com sucesso.`,
+      deleted: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        dashboards: user._count.dashboards,
+        transacoes: user._count.transacoes,
+        unidades: user._count.unidades,
+        categorias: user._count.categorias,
+      },
     };
   }
 }

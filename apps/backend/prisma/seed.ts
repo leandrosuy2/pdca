@@ -3,7 +3,7 @@
  * recria cenário rico para dashboards, importação, inteligência admin e ranking.
  * Não execute em produção com dados reais que devam ser preservados.
  */
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -90,6 +90,7 @@ async function seedUserData(owner: UserRow, profile: SeedProfile) {
       slug: slugDefault,
       description: 'Dashboard principal (padrão)',
       ownerId: owner.id,
+      template: 'RESTAURANTE',
       isDefault: true,
     },
   });
@@ -101,13 +102,14 @@ async function seedUserData(owner: UserRow, profile: SeedProfile) {
         slug: `${slugBase(owner.name)}-ops-${owner.id.slice(0, 6)}`,
         description: 'Visão operacional adicional',
         ownerId: owner.id,
+        template: 'RESTAURANTE',
         isDefault: false,
       },
     });
   }
 
   const now = new Date();
-  const transacoes: Parameters<typeof prisma.transacao.createMany>[0]['data'] = [];
+  const transacoes: Prisma.TransacaoCreateManyInput[] = [];
 
   for (let m = 0; m < months; m += 1) {
     const monthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1 - m), 12, 12, 0, 0, 0));
@@ -265,6 +267,7 @@ async function main() {
       name: 'Administrador PDCA',
       password: passwordHash,
       role: 'ADMIN',
+      template: 'RESTAURANTE',
       active: true,
     },
   });
@@ -275,6 +278,7 @@ async function main() {
       name: 'Maria Silva',
       password: passwordHash,
       role: 'USER',
+      template: 'RESTAURANTE',
       active: true,
     },
   });
@@ -285,6 +289,7 @@ async function main() {
       name: 'João Souza',
       password: passwordHash,
       role: 'USER',
+      template: 'RESTAURANTE',
       active: true,
     },
   });
@@ -295,6 +300,7 @@ async function main() {
       name: 'Carlos Oliveira',
       password: passwordHash,
       role: 'USER',
+      template: 'RESTAURANTE',
       active: true,
     },
   });
@@ -305,6 +311,7 @@ async function main() {
       name: 'Pedro Lima',
       password: passwordHash,
       role: 'USER',
+      template: 'RESTAURANTE',
       active: true,
     },
   });
@@ -315,6 +322,7 @@ async function main() {
       name: 'Ana Santos',
       password: passwordHash,
       role: 'USER',
+      template: 'RESTAURANTE',
       active: true,
     },
   });
@@ -325,6 +333,7 @@ async function main() {
       name: 'Usuário Inativo',
       password: passwordHash,
       role: 'USER',
+      template: 'RESTAURANTE',
       active: false,
     },
   });
@@ -380,6 +389,7 @@ async function main() {
       slug: `admin-visao-${admin.id.slice(0, 8)}`,
       description: 'Dashboard extra do administrador',
       ownerId: admin.id,
+      template: 'RESTAURANTE',
       isDefault: false,
     },
   });
