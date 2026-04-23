@@ -9,6 +9,13 @@ import Cookies from 'js-cookie';
 import axios from 'axios';
 import { Lock, Mail, Loader2 } from 'lucide-react';
 
+const getPostLoginPath = (role: unknown) => {
+  const normalized = String(role || '').toUpperCase();
+  if (normalized === 'DATA_ENTRY') return '/lancamentos';
+  if (normalized === 'ADMIN') return '/admin/inteligencia';
+  return '/dashboard';
+};
+
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -29,7 +36,7 @@ export default function LoginPage() {
 
       if (response.data.access_token) {
         Cookies.set('token', response.data.access_token, { expires: 1 });
-        router.push('/dashboards');
+        router.push(getPostLoginPath(response.data.user?.role));
       }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Login failed. Please check your credentials.');

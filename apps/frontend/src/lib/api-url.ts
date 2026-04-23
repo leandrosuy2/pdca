@@ -32,6 +32,10 @@ export function getUsersApiUrl(): string {
   return `${getApiUrl()}/users`;
 }
 
+export function getDataEntryApiUrl(): string {
+  return `${getApiUrl()}/data-entry`;
+}
+
 export function getHealthUrl(): string {
   return `${getApiUrl()}/health`;
 }

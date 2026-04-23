@@ -33,6 +33,10 @@ export class DashboardService {
     return String(user?.role || '').toUpperCase() === 'ADMIN';
   }
 
+  private isDataEntryUser(user: any) {
+    return String(user?.role || '').toUpperCase() === 'DATA_ENTRY';
+  }
+
   private normalizeText(value: any) {
     return String(value || '')
       .normalize('NFD')
@@ -164,6 +168,10 @@ export class DashboardService {
   }
 
   private async ensureDefaultDashboard(user: any) {
+    if (this.isDataEntryUser(user)) {
+      return null;
+    }
+
     const existing = await this.prisma.dashboard.findFirst({
       where: { ownerId: user.id, isDefault: true }
     });
@@ -199,6 +207,9 @@ export class DashboardService {
 
   private async resolveDashboardContext(user: any, dashboardId?: string) {
     if (!dashboardId) {
+      if (this.isDataEntryUser(user)) {
+        throw new ForbiddenException('Perfil de input nao possui dashboard proprio.');
+      }
       const dashboard = await this.ensureDefaultDashboard(user);
       return { dashboard: this.enrichDashboardTemplate(dashboard), scopedUserId: dashboard.ownerId };
     }
@@ -226,9 +237,20 @@ export class DashboardService {
   }
 
   async listDashboards(user: any) {
+    if (this.isDataEntryUser(user)) {
+      return { dashboards: [] };
+    }
+
     if (this.isAdminUser(user)) {
       await this.ensureDefaultDashboardsForAllUsers();
       const dashboards = await this.prisma.dashboard.findMany({
+        where: {
+          owner: {
+            role: {
+              not: 'DATA_ENTRY',
+            },
+          },
+        },
         include: { owner: { select: { id: true, name: true, email: true, role: true, template: true } } },
         orderBy: [{ owner: { name: 'asc' } }, { name: 'asc' }]
       });
@@ -415,7 +437,10 @@ export class DashboardService {
       include: { unidade: true, categoria: true }
     });
 
-    const units = await this.prisma.unidade.findMany({ where: { userId: scopedUserId }});
+    const units = await this.prisma.unidade.findMany({
+      where: { userId: scopedUserId },
+      include: { gestora: true },
+    });
     
     const radarData = units.map(un => {
       const unitTrans = transactions.filter(t => t.unidadeId === un.id);
@@ -451,6 +476,7 @@ export class DashboardService {
 
       return {
         unit: un.name,
+        gestora: un.gestora?.name || null,
         receita: rec,
         despesa: des,
         margem: rec > 0 ? ((rec - des) / rec) * 100 : 0,
@@ -1247,16 +1273,74 @@ export class DashboardService {
     await this.prisma.$transaction(
       async (tx) => {
         await tx.transacao.deleteMany({ where: { userId: targetUserId } });
-        await tx.unidade.deleteMany({ where: { userId: targetUserId } });
         await tx.categoria.deleteMany({ where: { userId: targetUserId } });
+
+        const normalizeKey = (value: string) =>
+          String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim()
+            .toUpperCase();
+
+        const existingGestoras = await tx.gestora.findMany({
+          where: { userId: targetUserId },
+        });
+        const gestoraByKey = new Map(
+          existingGestoras.map((gestora) => [normalizeKey(gestora.name), gestora]),
+        );
+
+        const existingUnits = await tx.unidade.findMany({
+          where: { userId: targetUserId },
+          include: { gestora: true },
+        });
+        const unidadeByKey = new Map(
+          existingUnits.map((unidade) => [normalizeKey(unidade.name), unidade]),
+        );
 
         const unidadeNames = [...new Set(parsedRows.map((r) => r.unidadeName))];
         const unidadeIdByName = new Map<string, string>();
+        const unidadeGestoraByName = new Map<string, string>();
+
         for (const name of unidadeNames) {
-          const unidade = await tx.unidade.create({
-            data: { name, userId: targetUserId },
-          });
+          const unidadeKey = normalizeKey(name);
+          const existingUnit = unidadeByKey.get(unidadeKey);
+          const sampleRow = parsedRows.find((row) => normalizeKey(row.unidadeName) === unidadeKey);
+          const gestoraBaseName = existingUnit?.gestora?.name || sampleRow?.gestora || 'Sem Gestora';
+          const gestoraKey = normalizeKey(gestoraBaseName);
+
+          let gestora = gestoraByKey.get(gestoraKey);
+          if (!gestora) {
+            gestora = await tx.gestora.create({
+              data: {
+                name: gestoraBaseName,
+                userId: targetUserId,
+              },
+            });
+            gestoraByKey.set(gestoraKey, gestora);
+          }
+
+          let unidade = existingUnit;
+          if (!unidade) {
+            unidade = await tx.unidade.create({
+              data: {
+                name,
+                userId: targetUserId,
+                gestoraId: gestora.id,
+              },
+              include: { gestora: true },
+            });
+            unidadeByKey.set(unidadeKey, unidade);
+          } else if (!unidade.gestoraId || unidade.gestoraId !== gestora.id) {
+            unidade = await tx.unidade.update({
+              where: { id: unidade.id },
+              data: { gestoraId: gestora.id },
+              include: { gestora: true },
+            });
+            unidadeByKey.set(unidadeKey, unidade);
+          }
+
           unidadeIdByName.set(name, unidade.id);
+          unidadeGestoraByName.set(name, unidade.gestora?.name || gestora.name);
         }
 
         const categoriaKey = (r: (typeof parsedRows)[0]) => `${r.catName}::${r.tipo}`;
@@ -1281,7 +1365,7 @@ export class DashboardService {
           await tx.transacao.createMany({
             data: slice.map((row) => ({
               description: row.descr,
-              gestora: row.gestora,
+              gestora: unidadeGestoraByName.get(row.unidadeName) || row.gestora,
               amount: row.amount,
               date: row.date,
               type: row.tipo,

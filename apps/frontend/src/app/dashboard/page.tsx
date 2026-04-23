@@ -1,11 +1,11 @@
 ﻿'use client';
 
-import { getDashboardApiUrl } from '@/lib/api-url';
+import { getDashboardApiUrl, getDataEntryApiUrl } from '@/lib/api-url';
 import { Suspense, useState, useEffect, useRef, Fragment, type ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import axios from "axios";
 import Cookies from "js-cookie";
-import { Loader2, CheckCircle2, XCircle, FileSpreadsheet } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, FileSpreadsheet, Save } from "lucide-react";
 import { getDashboardTemplateMeta } from "@/lib/dashboard-templates";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, LabelList,
@@ -13,7 +13,7 @@ import {
   AreaChart, Area, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ReferenceLine, ComposedChart
 } from "recharts";
 
-const TAB_KEYS = ['visaoGeral', 'porGestoras', 'porUnidade', 'custos', 'pessoas'] as const;
+const TAB_KEYS = ['visaoGeral', 'porGestoras', 'porUnidade', 'custos', 'pessoas', 'dados'] as const;
 type TabKey = typeof TAB_KEYS[number];
 const decodeToken = (token: string) => {
   try {
@@ -245,6 +245,10 @@ const getLatestMonthValue = (series: Array<{ mes?: string }>) =>
     .at(-1) || '';
 const getMonthLabel = (series: Array<{ mes?: string; mesLabel?: string }>, monthValue: string) =>
   series.find((item) => item?.mes === monthValue)?.mesLabel || monthValue;
+const currentMonthValue = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+};
 const ratioFromBase = (value: number, base: number) => {
   const denominator = Math.abs(toNum(base));
   if (denominator === 0) return 0;
@@ -686,7 +690,7 @@ const s = {
   h2: { fontSize: 16, fontWeight: 700, color: PALETTE.texto, marginBottom: 16 },
 };
 
-const ABAS = ["Visao Geral", "Por Gestoras", "Por Unidade", "Custos", "Pessoas"];
+const ABAS = ["Visao Geral", "Por Gestoras", "Por Unidade", "Custos", "Pessoas", "Dados"];
 
 function DashboardContent() {
   const router = useRouter();
@@ -705,6 +709,7 @@ function DashboardContent() {
     porUnidade: '',
     custos: '',
     pessoas: '',
+    dados: '',
   });
   const [filtroGestora, setFiltroGestora] = useState<string>("Todas");
   const [filtroUnidadeGestora, setFiltroUnidadeGestora] = useState<string>("Todas");
@@ -718,8 +723,19 @@ function DashboardContent() {
     ownerUserId?: string;
     errorMessage?: string;
   }>({ open: false, phase: "uploading" });
+  const [dataEntryContext, setDataEntryContext] = useState<any>(null);
+  const [dataEntryMonthly, setDataEntryMonthly] = useState<any>(null);
+  const [dataEntryLoading, setDataEntryLoading] = useState(false);
+  const [dataEntrySaving, setDataEntrySaving] = useState(false);
+  const [dataEntryError, setDataEntryError] = useState<string | null>(null);
+  const [dataEntrySuccess, setDataEntrySuccess] = useState<string | null>(null);
+  const [dataEntryMonth, setDataEntryMonth] = useState(currentMonthValue());
+  const [dataEntryUnitId, setDataEntryUnitId] = useState('');
+  const [dataEntryValues, setDataEntryValues] = useState<Record<string, number[]>>({});
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const currentToken = Cookies.get('token') || '';
+  const currentUser = decodeToken(currentToken);
   const activeTabKey = TAB_KEYS[aba] || 'visaoGeral';
   const activeMonthFilter = monthFilters[activeTabKey] || '';
   const activeDashboardId = searchParams.get('dashboardId') || dashboardId;
@@ -764,6 +780,119 @@ function DashboardContent() {
     });
 
     return { dataMap, failedKeys };
+  };
+
+  const fetchDataEntryContext = async () => {
+    try {
+      const token = Cookies.get('token') || '';
+      const response = await axios.get(`${getDataEntryApiUrl()}/context`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const context = response.data;
+      setDataEntryContext(context);
+
+      const matchingDashboard =
+        (context?.dashboards || []).find((dashboard: any) => dashboard.id === activeDashboardId) ||
+        (context?.dashboards || [])[0] ||
+        null;
+
+      const firstUnitId = matchingDashboard?.units?.[0]?.id || '';
+      setDataEntryUnitId((current) =>
+        current && matchingDashboard?.units?.some((unit: any) => unit.id === current) ? current : firstUnitId,
+      );
+    } catch (err) {
+      console.error("Failed to fetch data-entry context", err);
+      setDataEntryContext(null);
+      setDataEntryError('Nao foi possivel carregar os dados inputados.');
+    }
+  };
+
+  const fetchDataEntryMonthly = async (unitId: string, month: string) => {
+    if (!unitId || !month) return;
+
+    try {
+      setDataEntryLoading(true);
+      setDataEntryError(null);
+      setDataEntrySuccess(null);
+      const token = Cookies.get('token') || '';
+      const response = await axios.get(`${getDataEntryApiUrl()}/monthly`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { unitId, month },
+      });
+      const monthly = response.data;
+      setDataEntryMonthly(monthly);
+
+      const nextValues: Record<string, number[]> = {};
+      for (const entry of monthly?.entries || []) {
+        nextValues[`${entry.sectionKey}:${entry.rowKey}`] = Array.from({ length: 5 }, (_, index) =>
+          toNum(entry.weeklyValues?.[index]),
+        );
+      }
+      setDataEntryValues(nextValues);
+    } catch (err) {
+      console.error("Failed to fetch data-entry monthly", err);
+      setDataEntryMonthly(null);
+      setDataEntryError('Nao foi possivel carregar os valores mensais desta unidade.');
+    } finally {
+      setDataEntryLoading(false);
+    }
+  };
+
+  const saveDataEntryMonthly = async () => {
+    if (!dataEntryUnitId || !dataEntryMonth || !dataEntryMonthly?.template) return;
+
+    try {
+      setDataEntrySaving(true);
+      setDataEntryError(null);
+      setDataEntrySuccess(null);
+      const token = Cookies.get('token') || '';
+      const payload = {
+        unitId: dataEntryUnitId,
+        month: dataEntryMonth,
+        entries: (dataEntryMonthly.template || []).flatMap((section: any) =>
+          (section.rows || []).map((row: any) => ({
+            sectionKey: section.key,
+            rowKey: row.key,
+            weeklyValues: dataEntryValues[`${section.key}:${row.key}`] || [0, 0, 0, 0, 0],
+          })),
+        ),
+      };
+
+      const response = await axios.post(`${getDataEntryApiUrl()}/monthly`, payload, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const monthly = response.data;
+      setDataEntryMonthly(monthly);
+
+      const nextValues: Record<string, number[]> = {};
+      for (const entry of monthly?.entries || []) {
+        nextValues[`${entry.sectionKey}:${entry.rowKey}`] = Array.from({ length: 5 }, (_, index) =>
+          toNum(entry.weeklyValues?.[index]),
+        );
+      }
+      setDataEntryValues(nextValues);
+      setDataEntrySuccess('Dados mensais atualizados com sucesso.');
+      await fetchData({ includeFull: true, skipPageLoading: true });
+    } catch (err: any) {
+      console.error("Failed to save data-entry monthly", err);
+      setDataEntryError(err.response?.data?.message || 'Nao foi possivel salvar os dados mensais.');
+    } finally {
+      setDataEntrySaving(false);
+    }
+  };
+
+  const updateDataEntryValue = (sectionKey: string, rowKey: string, weekIndex: number, rawValue: string) => {
+    const parsed = Number(rawValue);
+    const key = `${sectionKey}:${rowKey}`;
+
+    setDataEntryValues((current) => {
+      const next = current[key] ? [...current[key]] : [0, 0, 0, 0, 0];
+      next[weekIndex] = Number.isFinite(parsed) ? parsed : 0;
+      return {
+        ...current,
+        [key]: next,
+      };
+    });
   };
 
   const fetchData = async (options?: { includeFull?: boolean; skipPageLoading?: boolean }) => {
@@ -884,6 +1013,16 @@ function DashboardContent() {
     if (!activeDashboardId && isAdminRole(decodeToken(Cookies.get('token') || '')?.role)) return;
     fetchData();
   }, [aba, activeMonthFilter]);
+
+  useEffect(() => {
+    fetchDataEntryContext();
+  }, [activeDashboardId]);
+
+  useEffect(() => {
+    if (activeTabKey !== 'dados') return;
+    if (!dataEntryUnitId || !dataEntryMonth) return;
+    fetchDataEntryMonthly(dataEntryUnitId, dataEntryMonth);
+  }, [activeTabKey, dataEntryUnitId, dataEntryMonth]);
 
 
   if (loading || !dashboardData) {
@@ -2714,7 +2853,191 @@ function DashboardContent() {
     );
   };
 
-  const abas = [AbaVisaoGeral, AbaPorGestoras, AbaEvolutivos, AbaCustos, AbaPessoas];
+  const AbaDados = () => {
+    const dashboards = dataEntryContext?.dashboards || [];
+    const currentDashboard =
+      dashboards.find((dashboard: any) => dashboard.id === activeDashboardId) ||
+      dashboards[0] ||
+      null;
+    const units = currentDashboard?.units || [];
+    const currentUnit =
+      units.find((unit: any) => unit.id === dataEntryUnitId) ||
+      units[0] ||
+      null;
+    const currentTemplate = dataEntryMonthly?.template || dataEntryContext?.template || [];
+    const currentUserId = String(currentUser?.sub || currentUser?.id || '');
+    const canEditData =
+      String(currentUser?.role || '').toUpperCase() === 'ADMIN' ||
+      String(currentUser?.role || '').toUpperCase() === 'DATA_ENTRY' ||
+      currentUserId === String(currentDashboard?.owner?.id || '');
+
+    return (
+      <div style={{ display: 'grid', gap: 18 }}>
+        <div style={s.card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' as const }}>
+            <div>
+              <div style={s.titulo}>DADOS INPUTADOS</div>
+              <div style={{ color: PALETTE.texto, fontSize: 20, fontWeight: 800, letterSpacing: -0.3 }}>
+                Ajuste mensal por unidade
+              </div>
+              <div style={{ color: PALETTE.textoSec, fontSize: 13, marginTop: 6, maxWidth: 760 }}>
+                Aqui as gestoras podem revisar os dados que ja foram lancados. A unidade escolhida continua vinculada automaticamente a sua gestora-base.
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={saveDataEntryMonthly}
+              disabled={!canEditData || dataEntrySaving || !dataEntryUnitId}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                border: 'none',
+                borderRadius: 12,
+                padding: '12px 18px',
+                background: !canEditData || dataEntrySaving || !dataEntryUnitId ? PALETTE.cinzaClaro : PALETTE.azul,
+                color: !canEditData || dataEntrySaving || !dataEntryUnitId ? PALETTE.textoSec : '#fff',
+                fontWeight: 700,
+                cursor: !canEditData || dataEntrySaving || !dataEntryUnitId ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {dataEntrySaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+              Salvar dados
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 22 }}>
+            <label style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.8, color: PALETTE.textoSec, textTransform: 'uppercase' }}>Unidade</span>
+              <select
+                value={dataEntryUnitId}
+                onChange={(e) => setDataEntryUnitId(e.target.value)}
+                style={{ borderRadius: 12, border: `1px solid ${PALETTE.borda}`, padding: '12px 14px', background: PALETTE.card, color: PALETTE.texto }}
+              >
+                {units.map((unit: any) => (
+                  <option key={unit.id} value={unit.id}>
+                    {unit.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.8, color: PALETTE.textoSec, textTransform: 'uppercase' }}>Mes de referencia</span>
+              <input
+                type="month"
+                value={dataEntryMonth}
+                onChange={(e) => setDataEntryMonth(e.target.value)}
+                style={{ borderRadius: 12, border: `1px solid ${PALETTE.borda}`, padding: '12px 14px', background: PALETTE.card, color: PALETTE.texto }}
+              />
+            </label>
+
+            <div style={{ borderRadius: 12, border: `1px solid ${PALETTE.borda}`, padding: '12px 14px', background: PALETTE.painel }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.8, color: PALETTE.textoSec, textTransform: 'uppercase' }}>Gestora vinculada</div>
+              <div style={{ color: PALETTE.texto, fontSize: 18, fontWeight: 800, marginTop: 10 }}>
+                {currentUnit?.gestora || dataEntryMonthly?.unit?.gestora || 'Sem Gestora'}
+              </div>
+            </div>
+
+            <div style={{ borderRadius: 12, border: `1px solid ${PALETTE.borda}`, padding: '12px 14px', background: PALETTE.painel }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.8, color: PALETTE.textoSec, textTransform: 'uppercase' }}>Resumo do mes</div>
+              <div style={{ display: 'grid', gap: 4, marginTop: 10, fontSize: 13, color: PALETTE.texto }}>
+                <span>Receita: <strong>{fmt(toNum(dataEntryMonthly?.summary?.receita))}</strong></span>
+                <span>Despesa: <strong>{fmt(toNum(dataEntryMonthly?.summary?.despesa))}</strong></span>
+                <span>Resultado: <strong style={{ color: getResultadoColor(toNum(dataEntryMonthly?.summary?.resultado)) }}>{fmt(toNum(dataEntryMonthly?.summary?.resultado))}</strong></span>
+              </div>
+            </div>
+          </div>
+
+          {dataEntryError && (
+            <div style={{ marginTop: 16, padding: '10px 12px', borderRadius: 8, border: `1px solid ${PALETTE.vermelho}`, background: `${PALETTE.vermelho}16`, color: PALETTE.texto, fontSize: 13 }}>
+              {dataEntryError}
+            </div>
+          )}
+
+          {dataEntrySuccess && (
+            <div style={{ marginTop: 16, padding: '10px 12px', borderRadius: 8, border: `1px solid ${PALETTE.verde}`, background: `${PALETTE.verde}14`, color: PALETTE.texto, fontSize: 13 }}>
+              {dataEntrySuccess}
+            </div>
+          )}
+        </div>
+
+        <div style={s.card}>
+          <div style={s.titulo}>GRADE MENSAL DE DADOS</div>
+          {dataEntryLoading ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 220, color: PALETTE.textoSec, gap: 10 }}>
+              <Loader2 className="animate-spin" size={18} />
+              Carregando valores mensais...
+            </div>
+          ) : currentTemplate.length === 0 ? (
+            <div style={{ color: PALETTE.textoSec, fontSize: 14 }}>Nenhuma estrutura de input disponivel para este dashboard.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 18 }}>
+              {currentTemplate.map((section: any) => (
+                <div key={section.key} style={{ border: `1px solid ${PALETTE.borda}`, borderRadius: 16, overflow: 'hidden' }}>
+                  <div style={{ padding: '14px 18px', background: PALETTE.painel, borderBottom: `1px solid ${PALETTE.borda}` }}>
+                    <div style={{ color: PALETTE.texto, fontSize: 16, fontWeight: 800 }}>{section.label}</div>
+                    <div style={{ color: PALETTE.textoSec, fontSize: 12, marginTop: 4 }}>
+                      {section.type} • Categoria {section.categoryName}
+                    </div>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', minWidth: 860, borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: PALETTE.card, borderBottom: `1px solid ${PALETTE.borda}` }}>
+                          {['Linha / Fornecedor', '1 Semana', '2 Semana', '3 Semana', '4 Semana', '5 Semana', 'Total'].map((label) => (
+                            <th key={label} style={{ padding: '12px 14px', textAlign: 'left', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.8, color: PALETTE.textoSec }}>
+                              {label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(section.rows || []).map((row: any) => {
+                          const values = dataEntryValues[`${section.key}:${row.key}`] || [0, 0, 0, 0, 0];
+                          const total = values.reduce((acc: number, value: number) => acc + toNum(value), 0);
+
+                          return (
+                            <tr key={row.key} style={{ borderBottom: `1px solid ${PALETTE.borda}` }}>
+                              <td style={{ padding: '12px 14px', color: PALETTE.texto, fontWeight: 600 }}>{row.label}</td>
+                              {values.map((value: number, weekIndex: number) => (
+                                <td key={`${row.key}-${weekIndex}`} style={{ padding: '10px 14px' }}>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={value === 0 ? '' : value}
+                                    disabled={!canEditData}
+                                    onChange={(e) => updateDataEntryValue(section.key, row.key, weekIndex, e.target.value)}
+                                    style={{
+                                      width: 110,
+                                      borderRadius: 10,
+                                      border: `1px solid ${PALETTE.borda}`,
+                                      padding: '10px 12px',
+                                      background: canEditData ? PALETTE.card : PALETTE.painel,
+                                      color: PALETTE.texto,
+                                    }}
+                                  />
+                                </td>
+                              ))}
+                              <td style={{ padding: '12px 14px', color: PALETTE.texto, fontWeight: 700 }}>{fmt(total)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const abas = [AbaVisaoGeral, AbaPorGestoras, AbaEvolutivos, AbaCustos, AbaPessoas, AbaDados];
   const AbaAtual = abas[aba];
   const activeTemplateMeta = getDashboardTemplateMeta(dashboardMeta?.template);
 

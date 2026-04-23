@@ -7,6 +7,7 @@ import { HealthModule } from './modules/health/health.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { DataEntryModule } from './modules/data-entry/data-entry.module';
 import { UsersModule } from './modules/users/users.module';
 
 /** Monorepo: cwd costuma ser a raiz; Nest por padrão só lê `.env` do cwd. */
@@ -31,6 +32,7 @@ const envPaths = resolveEnvFilePaths();
     PrismaModule,
     AuthModule,
     DashboardModule,
+    DataEntryModule,
     UsersModule,
     HealthModule,
   ],

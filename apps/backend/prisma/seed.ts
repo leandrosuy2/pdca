@@ -1,7 +1,9 @@
 /**
- * Seed completo: apaga transações, acessos, dashboards, unidades, categorias e usuários,
- * recria cenário rico para dashboards, importação, inteligência admin e ranking.
- * Não execute em produção com dados reais que devam ser preservados.
+ * Seed base do sistema:
+ * - recria a estrutura principal
+ * - mantém um admin para gestão
+ * - cria os dashboards das diretoras Ellen e Raiclene
+ * - registra a hierarquia Gestora > Unidade para servir de base futura
  */
 import { Prisma, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
@@ -9,10 +11,22 @@ import * as bcrypt from 'bcrypt';
 const prisma = new PrismaClient();
 
 const DEMO_PASSWORD = '123456';
-/** Meses de histórico (inteligência YoY + trimestres) */
-const MONTHS_HISTORY = 24;
+const MONTHS_HISTORY = 12;
 
-const gestoras = ['Carla Mendes', 'Roberto Dias', 'Fernanda Costa', 'Equipe Central'];
+type UserRow = { id: string; name: string; email: string };
+
+type GestoraSeed = {
+  name: string;
+  unidades: string[];
+};
+
+type SeedProfile = {
+  dashboardName?: string;
+  dashboardDescription?: string;
+  gestoras: GestoraSeed[];
+  receitaScale: number;
+  months?: number;
+};
 
 function slugBase(text: string) {
   return text
@@ -32,34 +46,51 @@ async function wipeAll() {
   await prisma.dashboardAccess.deleteMany();
   await prisma.dashboard.deleteMany();
   await prisma.unidade.deleteMany();
+  await prisma.gestora.deleteMany();
   await prisma.categoria.deleteMany();
   await prisma.user.deleteMany();
 }
 
-type UserRow = { id: string; name: string; email: string };
-
-type SeedProfile = {
-  unidades: string[];
-  extraDashboard?: boolean;
-  /** Multiplicador de receitas (ranking) */
-  receitaScale: number;
-  /** Meses efetivos (ex.: Ana com menos histórico) */
-  months?: number;
-};
-
 async function seedUserData(owner: UserRow, profile: SeedProfile) {
   const months = profile.months ?? MONTHS_HISTORY;
-  const sc = profile.receitaScale;
+  const receitaScale = profile.receitaScale;
 
-  const unidadeRecords = await Promise.all(
-    profile.unidades.map((name) =>
-      prisma.unidade.create({
-        data: { name, userId: owner.id },
+  const gestoraRecords = await Promise.all(
+    profile.gestoras.map((gestora) =>
+      prisma.gestora.create({
+        data: {
+          name: gestora.name,
+          userId: owner.id,
+        },
       }),
     ),
   );
 
-  const catDefs: { name: string; type: string }[] = [
+  const gestoraByName = new Map(gestoraRecords.map((gestora) => [gestora.name, gestora]));
+
+  const unidadeRecords = await Promise.all(
+    profile.gestoras.flatMap((gestora) =>
+      gestora.unidades.map((unidade) =>
+        prisma.unidade.create({
+          data: {
+            name: unidade,
+            userId: owner.id,
+            gestoraId: gestoraByName.get(gestora.name)!.id,
+          },
+        }),
+      ),
+    ),
+  );
+
+  const unidadesComGestora = unidadeRecords.map((unidade) => {
+    const gestora = profile.gestoras.find((item) => item.unidades.includes(unidade.name));
+    return {
+      ...unidade,
+      gestoraName: gestora?.name || owner.name,
+    };
+  });
+
+  const catDefs: Array<{ name: string; type: 'RECEITA' | 'DESPESA' }> = [
     { name: 'Serviços Prestados', type: 'RECEITA' },
     { name: 'Vendas de Produtos', type: 'RECEITA' },
     { name: 'Outras Receitas', type: 'RECEITA' },
@@ -74,174 +105,166 @@ async function seedUserData(owner: UserRow, profile: SeedProfile) {
   ];
 
   const categorias = await Promise.all(
-    catDefs.map((c) =>
+    catDefs.map((categoria) =>
       prisma.categoria.create({
-        data: { name: c.name, type: c.type, userId: owner.id },
+        data: {
+          name: categoria.name,
+          type: categoria.type,
+          userId: owner.id,
+        },
       }),
     ),
   );
 
-  const catByName = (n: string) => categorias.find((c) => c.name === n)!;
+  const catByName = (name: string) => categorias.find((categoria) => categoria.name === name)!;
 
-  const slugDefault = `${slugBase(owner.name || owner.email)}-${owner.id.slice(0, 8)}`;
   const dashDefault = await prisma.dashboard.create({
     data: {
-      name: `Dashboard — ${owner.name}`,
-      slug: slugDefault,
-      description: 'Dashboard principal (padrão)',
+      name: profile.dashboardName || `Dashboard de ${owner.name}`,
+      slug: `${slugBase(owner.name || owner.email)}-${owner.id.slice(0, 8)}`,
+      description: profile.dashboardDescription || 'Dashboard principal da diretora',
       ownerId: owner.id,
       template: 'RESTAURANTE',
       isDefault: true,
     },
   });
 
-  if (profile.extraDashboard) {
-    await prisma.dashboard.create({
-      data: {
-        name: `Operações — ${owner.name}`,
-        slug: `${slugBase(owner.name)}-ops-${owner.id.slice(0, 6)}`,
-        description: 'Visão operacional adicional',
-        ownerId: owner.id,
-        template: 'RESTAURANTE',
-        isDefault: false,
-      },
-    });
-  }
-
   const now = new Date();
   const transacoes: Prisma.TransacaoCreateManyInput[] = [];
 
   for (let m = 0; m < months; m += 1) {
-    const monthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1 - m), 12, 12, 0, 0, 0));
+    const monthDate = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1 - m), 12, 12, 0, 0, 0),
+    );
     const monthLabel = monthDate.toISOString().slice(0, 7);
-    const trend = 1 + m * 0.012;
+    const trend = 1 + m * 0.015;
 
-    for (const un of unidadeRecords) {
-      const g = gestoras[Math.floor(Math.random() * gestoras.length)];
+    for (const unidade of unidadesComGestora) {
+      const gestoraName = unidade.gestoraName;
+      const headcount = 12 + Math.floor(Math.random() * 18);
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('Serviços Prestados').id,
         type: 'RECEITA',
-        amount: Math.round(randomBetween(22000, 58000) * sc * trend * 100) / 100,
+        amount: Math.round(randomBetween(26000, 64000) * receitaScale * trend * 100) / 100,
         date: monthDate,
         description: `Faturamento serviços ${monthLabel}`,
-        gestora: g,
+        gestora: gestoraName,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('Vendas de Produtos').id,
         type: 'RECEITA',
-        amount: Math.round(randomBetween(5000, 26000) * sc * trend * 100) / 100,
+        amount: Math.round(randomBetween(7000, 24000) * receitaScale * trend * 100) / 100,
         date: monthDate,
-        description: `Vendas produtos ${monthLabel}`,
-        gestora: g,
+        description: `Receita complementar ${monthLabel}`,
+        gestora: gestoraName,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('Outras Receitas').id,
         type: 'RECEITA',
-        amount: Math.round(randomBetween(800, 5200) * sc * trend * 100) / 100,
+        amount: Math.round(randomBetween(1000, 5000) * receitaScale * trend * 100) / 100,
         date: monthDate,
-        description: `Receitas diversas ${monthLabel}`,
-        gestora: g,
+        description: `Outras receitas ${monthLabel}`,
+        gestora: gestoraName,
       });
 
-      const headcount = 10 + Math.floor(Math.random() * 22);
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('PROVENTOS').id,
         type: 'DESPESA',
-        amount: Math.round(randomBetween(38000, 92000) * sc * 100) / 100,
+        amount: Math.round(randomBetween(24000, 52000) * receitaScale * 100) / 100,
         date: monthDate,
-        description: g,
-        gestora: g,
+        description: gestoraName,
+        gestora: gestoraName,
         qtdFunc: headcount,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('ENCARGOS FOLHA').id,
         type: 'DESPESA',
-        amount: Math.round(randomBetween(9000, 32000) * sc * 100) / 100,
+        amount: Math.round(randomBetween(7000, 17000) * receitaScale * 100) / 100,
         date: monthDate,
-        description: g,
-        gestora: g,
+        description: gestoraName,
+        gestora: gestoraName,
         qtdFunc: headcount,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('FOPEG').id,
         type: 'DESPESA',
-        amount: Math.round(randomBetween(4000, 18000) * sc * 100) / 100,
+        amount: Math.round(randomBetween(3000, 9000) * receitaScale * 100) / 100,
         date: monthDate,
         description: `FOPEG ${monthLabel}`,
-        gestora: g,
+        gestora: gestoraName,
         qtdFunc: headcount,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('TURNOVER_OPERACIONAL').id,
         type: 'DESPESA',
-        amount: Math.round(randomBetween(2500, 12000) * sc * 100) / 100,
+        amount: Math.round(randomBetween(1800, 6500) * receitaScale * 100) / 100,
         date: monthDate,
         description: `Turnover ${monthLabel}`,
-        gestora: g,
+        gestora: gestoraName,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('Infraestrutura e TI').id,
         type: 'DESPESA',
-        amount: Math.round(randomBetween(2200, 14000) * sc * 100) / 100,
+        amount: Math.round(randomBetween(1600, 7200) * receitaScale * 100) / 100,
         date: monthDate,
-        description: `Cloud ${monthLabel}`,
-        gestora: g,
+        description: `Infraestrutura ${monthLabel}`,
+        gestora: gestoraName,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('Marketing e Vendas').id,
         type: 'DESPESA',
-        amount: Math.round(randomBetween(1800, 10000) * sc * 100) / 100,
+        amount: Math.round(randomBetween(1400, 7800) * receitaScale * 100) / 100,
         date: monthDate,
         description: `Marketing ${monthLabel}`,
-        gestora: g,
+        gestora: gestoraName,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('Fornecedores Gerais').id,
         type: 'DESPESA',
-        amount: Math.round(randomBetween(3500, 20000) * sc * 100) / 100,
+        amount: Math.round(randomBetween(2600, 11000) * receitaScale * 100) / 100,
         date: monthDate,
         description: `Fornecedores ${monthLabel}`,
-        gestora: g,
+        gestora: gestoraName,
       });
 
       transacoes.push({
         userId: owner.id,
-        unidadeId: un.id,
+        unidadeId: unidade.id,
         categoriaId: catByName('Utilidades e Consumo').id,
         type: 'DESPESA',
-        amount: Math.round(randomBetween(900, 6000) * sc * 100) / 100,
+        amount: Math.round(randomBetween(900, 4200) * receitaScale * 100) / 100,
         date: monthDate,
         description: `Utilidades ${monthLabel}`,
-        gestora: g,
+        gestora: gestoraName,
       });
     }
   }
@@ -250,6 +273,7 @@ async function seedUserData(owner: UserRow, profile: SeedProfile) {
 
   return {
     dashDefault,
+    gestoras: gestoraRecords.length,
     unidades: unidadeRecords.length,
     categorias: categorias.length,
     transacoes: transacoes.length,
@@ -272,10 +296,10 @@ async function main() {
     },
   });
 
-  const maria = await prisma.user.create({
+  const ellen = await prisma.user.create({
     data: {
-      email: 'maria.silva@pdca.com',
-      name: 'Maria Silva',
+      email: 'ellen@pdca.com',
+      name: 'Ellen',
       password: passwordHash,
       role: 'USER',
       template: 'RESTAURANTE',
@@ -283,10 +307,10 @@ async function main() {
     },
   });
 
-  const joao = await prisma.user.create({
+  const raiclene = await prisma.user.create({
     data: {
-      email: 'joao.souza@pdca.com',
-      name: 'João Souza',
+      email: 'raiclene@pdca.com',
+      name: 'Raiclene',
       password: passwordHash,
       role: 'USER',
       template: 'RESTAURANTE',
@@ -294,126 +318,88 @@ async function main() {
     },
   });
 
-  const carlos = await prisma.user.create({
+  const operadorInput = await prisma.user.create({
     data: {
-      email: 'carlos.oliveira@pdca.com',
-      name: 'Carlos Oliveira',
+      email: 'input@pdca.com',
+      name: 'Operador de Input',
       password: passwordHash,
-      role: 'USER',
+      role: 'DATA_ENTRY',
       template: 'RESTAURANTE',
       active: true,
-    },
-  });
-
-  const pedro = await prisma.user.create({
-    data: {
-      email: 'pedro.lima@pdca.com',
-      name: 'Pedro Lima',
-      password: passwordHash,
-      role: 'USER',
-      template: 'RESTAURANTE',
-      active: true,
-    },
-  });
-
-  const ana = await prisma.user.create({
-    data: {
-      email: 'ana.santos@pdca.com',
-      name: 'Ana Santos',
-      password: passwordHash,
-      role: 'USER',
-      template: 'RESTAURANTE',
-      active: true,
-    },
-  });
-
-  await prisma.user.create({
-    data: {
-      email: 'inativo@pdca.com',
-      name: 'Usuário Inativo',
-      password: passwordHash,
-      role: 'USER',
-      template: 'RESTAURANTE',
-      active: false,
     },
   });
 
   const adminStats = await seedUserData(admin, {
-    unidades: ['Matriz Admin'],
-    receitaScale: 0.35,
-    months: MONTHS_HISTORY,
+    dashboardName: 'Dashboard Administrativo',
+    dashboardDescription: 'Base administrativa interna',
+    gestoras: [
+      {
+        name: 'Administrativo',
+        unidades: ['Administrativo Central'],
+      },
+    ],
+    receitaScale: 0.3,
   });
 
-  const mariaStats = await seedUserData(maria, {
-    unidades: ['Unidade São Paulo', 'Unidade Rio de Janeiro', 'Unidade Curitiba'],
-    extraDashboard: true,
-    receitaScale: 1,
-    months: MONTHS_HISTORY,
+  const ellenStats = await seedUserData(ellen, {
+    dashboardName: 'Dashboard de Ellen',
+    dashboardDescription: 'Base operacional da diretora Ellen',
+    gestoras: [
+      {
+        name: 'Ellen',
+        unidades: ['Unidade Centro', 'Unidade Cohab', 'Unidade Shopping'],
+      },
+    ],
+    receitaScale: 1.05,
   });
 
-  const joaoStats = await seedUserData(joao, {
-    unidades: ['Hub João — Sul', 'Hub João — Norte'],
-    receitaScale: 1.45,
-    months: MONTHS_HISTORY,
+  const raicleneStats = await seedUserData(raiclene, {
+    dashboardName: 'Dashboard de Raiclene',
+    dashboardDescription: 'Base operacional da diretora Raiclene',
+    gestoras: [
+      {
+        name: 'Raiclene',
+        unidades: ['Unidade Cidade Nova', 'Unidade Ponta Negra', 'Unidade Vieiralves'],
+      },
+    ],
+    receitaScale: 0.95,
   });
 
-  const carlosStats = await seedUserData(carlos, {
-    unidades: ['Centro BH', 'Filial Vitória'],
-    receitaScale: 0.85,
-    months: MONTHS_HISTORY,
-  });
-
-  const pedroStats = await seedUserData(pedro, {
-    unidades: ['Loja Pedro'],
-    receitaScale: 0.5,
-    months: MONTHS_HISTORY,
-  });
-
-  const anaStats = await seedUserData(ana, {
-    unidades: ['Projeto Ana'],
-    receitaScale: 0.55,
-    months: 14,
-  });
-
-  await prisma.dashboardAccess.create({
-    data: {
-      dashboardId: mariaStats.dashDefault.id,
-      userId: ana.id,
-      permission: 'VIEW',
-    },
-  });
-
-  await prisma.dashboard.create({
-    data: {
-      name: 'Painel consolidado (admin)',
-      slug: `admin-visao-${admin.id.slice(0, 8)}`,
-      description: 'Dashboard extra do administrador',
-      ownerId: admin.id,
-      template: 'RESTAURANTE',
-      isDefault: false,
-    },
+  await prisma.dashboardAccess.createMany({
+    data: [
+      {
+        dashboardId: ellenStats.dashDefault.id,
+        userId: operadorInput.id,
+        permission: 'EDIT',
+      },
+      {
+        dashboardId: raicleneStats.dashDefault.id,
+        userId: operadorInput.id,
+        permission: 'EDIT',
+      },
+    ],
   });
 
   const summary = await prisma.user.count();
   const tx = await prisma.transacao.count();
   const dash = await prisma.dashboard.count();
-  const access = await prisma.dashboardAccess.count();
+  const gestoras = await prisma.gestora.count();
+  const unidades = await prisma.unidade.count();
 
   console.log('');
-  console.log('=== Seed PDCA concluído ===');
-  console.log(`Histórico: ${MONTHS_HISTORY} meses (Ana: 14 meses) | Categorias: FOPEG + TURNOVER_OPERACIONAL para inteligência admin.`);
-  console.log(`Usuários: ${summary} | Transações: ${tx} | Dashboards: ${dash} | Acessos: ${access}`);
+  console.log('=== Seed base do sistema concluído ===');
+  console.log(`Histórico: ${MONTHS_HISTORY} meses`);
+  console.log(`Usuários: ${summary} | Dashboards: ${dash} | Gestoras: ${gestoras} | Unidades: ${unidades} | Transações: ${tx}`);
   console.log('');
-  console.log(`Senha de todos: ${DEMO_PASSWORD}`);
-  console.log('  admin@pdca.com           ADMIN  (dados leves)');
-  console.log('  joao.souza@pdca.com      USER   (maior faturamento — ranking)');
-  console.log('  maria.silva@pdca.com     USER   (3 unidades, 2 dashboards)');
-  console.log('  carlos.oliveira@pdca.com USER');
-  console.log('  pedro.lima@pdca.com      USER   (menor escala — ranking)');
-  console.log('  ana.santos@pdca.com      USER   (VIEW dashboard Maria)');
-  console.log('  inativo@pdca.com         inativo');
+  console.log(`Senha padrão: ${DEMO_PASSWORD}`);
+  console.log('  admin@pdca.com      ADMIN');
+  console.log('  ellen@pdca.com      USER');
+  console.log('  raiclene@pdca.com   USER');
+  console.log('  input@pdca.com      DATA_ENTRY');
   console.log('');
-  console.log(`Transações: admin ${adminStats.transacoes} | maria ${mariaStats.transacoes} | joão ${joaoStats.transacoes} | carlos ${carlosStats.transacoes} | pedro ${pedroStats.transacoes} | ana ${anaStats.transacoes}`);
+  console.log(`Base admin: ${adminStats.gestoras} gestora(s), ${adminStats.unidades} unidade(s), ${adminStats.transacoes} transações`);
+  console.log(`Base Ellen: ${ellenStats.gestoras} gestora(s), ${ellenStats.unidades} unidade(s), ${ellenStats.transacoes} transações`);
+  console.log(`Base Raiclene: ${raicleneStats.gestoras} gestora(s), ${raicleneStats.unidades} unidade(s), ${raicleneStats.transacoes} transações`);
   console.log('');
 }
 

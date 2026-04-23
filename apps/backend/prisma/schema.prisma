@@ -24,11 +24,25 @@ model User {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
+  gestoras     Gestora[]
   unidades     Unidade[]
   categorias   Categoria[]
   transacoes   Transacao[]
   dashboards   Dashboard[]       @relation("DashboardOwner")
   dashboardAccess DashboardAccess[]
+}
+
+model Gestora {
+  id        String   @id @default(uuid())
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  unidades Unidade[]
+
+  @@unique([userId, name])
 }
 
 model Dashboard {
@@ -63,10 +77,14 @@ model Unidade {
   name      String
   userId    String
   user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gestoraId String?
+  gestora   Gestora?    @relation(fields: [gestoraId], references: [id], onDelete: SetNull)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
   transacoes Transacao[]
+
+  @@unique([userId, name])
 }
 
 model Categoria {

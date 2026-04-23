@@ -202,8 +202,8 @@ export class UsersService {
       throw new BadRequestException('Nome, e-mail e senha sao obrigatorios.');
     }
 
-    if (!['ADMIN', 'USER'].includes(role)) {
-      throw new BadRequestException('Perfil invalido. Use ADMIN ou USER.');
+    if (!['ADMIN', 'USER', 'DATA_ENTRY'].includes(role)) {
+      throw new BadRequestException('Perfil invalido. Use ADMIN, USER ou DATA_ENTRY.');
     }
 
     const existing = await this.prisma.user.findUnique({ where: { email } });

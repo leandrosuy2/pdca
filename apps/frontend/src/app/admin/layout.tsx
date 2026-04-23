@@ -3,7 +3,15 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import Cookies from 'js-cookie';
-import { ArrowLeft, BarChart3, LogOut, Shield, Sparkles, Users } from 'lucide-react';
+import {
+  ArrowLeft,
+  BarChart3,
+  LayoutDashboard,
+  LogOut,
+  Shield,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 
 export default function AdminLayout({
   children,
@@ -14,9 +22,10 @@ export default function AdminLayout({
   const pathname = usePathname();
 
   const nav = [
-    { href: '/admin/inteligencia', label: 'Inteligência', icon: Sparkles },
+    { href: '/admin/inteligencia', label: 'Inteligencia', icon: Sparkles },
+    { href: '/admin/dashboards', label: 'Dashboards', icon: LayoutDashboard },
     { href: '/admin/resumo', label: 'Resumo', icon: BarChart3 },
-    { href: '/admin/users', label: 'Usuários', icon: Users },
+    { href: '/admin/users', label: 'Usuarios', icon: Users },
   ] as const;
 
   return (
@@ -27,7 +36,7 @@ export default function AdminLayout({
             <div className="flex items-center gap-3">
               <Shield className="shrink-0 text-primary" size={22} />
               <div>
-                <div className="text-sm font-semibold">Área Administrativa</div>
+                <div className="text-sm font-semibold">Area Administrativa</div>
                 <div className="text-xs text-muted-foreground">Apenas administradores</div>
               </div>
             </div>
@@ -54,7 +63,7 @@ export default function AdminLayout({
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => router.push('/dashboards')}
+              onClick={() => router.push('/dashboard')}
               className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground"
             >
               <ArrowLeft size={16} />
