@@ -140,6 +140,23 @@ const getEntryTotal = (entryValues: Record<string, number[]>, sectionKey: string
 const getSectionTotal = (entryValues: Record<string, number[]>, section?: TemplateSection) =>
   section ? section.rows.reduce((sum, row) => sum + getEntryTotal(entryValues, section.key, row.key), 0) : 0;
 
+const getSectionWeeklyTotals = (
+  entryValues: Record<string, number[]>,
+  section?: TemplateSection,
+) => {
+  const totals = [0, 0, 0, 0, 0];
+  if (!section) return totals;
+
+  for (const row of section.rows) {
+    const values = entryValues[`${section.key}:${row.key}`] || [0, 0, 0, 0, 0];
+    for (let index = 0; index < 5; index += 1) {
+      totals[index] += Number(values[index] || 0);
+    }
+  }
+
+  return totals;
+};
+
 export default function LancamentosPage() {
   const [loadingContext, setLoadingContext] = useState(true);
   const [loadingLaunches, setLoadingLaunches] = useState(false);
@@ -186,6 +203,7 @@ export default function LancamentosPage() {
   const diversosTotal =
     getSectionTotal(entryValues, sectionsByKey.nao_alimentar_operacao) - gasTotal;
   const faturamentoMensal = getSectionTotal(entryValues, sectionsByKey.receita);
+  const faturamentoWeekly = getSectionWeeklyTotals(entryValues, sectionsByKey.receita);
   const ticketsTotal = getEntryTotal(entryValues, 'receita', 'tickets');
   const custoTotal =
     proteinasTotal +
@@ -197,10 +215,14 @@ export default function LancamentosPage() {
     limpezaTotal +
     gasTotal +
     diversosTotal;
-  const massaSalarialTotal = getEntryTotal(entryValues, 'resumo_financeiro', 'massa_salarial');
-  const encargosFolhaTotal = getEntryTotal(entryValues, 'resumo_financeiro', 'encargos_folha');
-  const despesaAdmTotal = getEntryTotal(entryValues, 'resumo_financeiro', 'despesa_adm');
-  const impostosTotal = getEntryTotal(entryValues, 'resumo_financeiro', 'impostos');
+  const massaSalarialWeekly = entryValues['resumo_financeiro:massa_salarial'] || [0, 0, 0, 0, 0];
+  const encargosFolhaWeekly = massaSalarialWeekly.map((value) => Number((Number(value || 0) * 1.05).toFixed(2)));
+  const despesaAdmWeekly = faturamentoWeekly.map((value) => Number((Number(value || 0) * 0.07).toFixed(2)));
+  const impostosWeekly = faturamentoWeekly.map((value) => Number((Number(value || 0) * 0.096).toFixed(2)));
+  const massaSalarialTotal = massaSalarialWeekly.reduce((sum, value) => sum + Number(value || 0), 0);
+  const encargosFolhaTotal = encargosFolhaWeekly.reduce((sum, value) => sum + Number(value || 0), 0);
+  const despesaAdmTotal = despesaAdmWeekly.reduce((sum, value) => sum + Number(value || 0), 0);
+  const impostosTotal = impostosWeekly.reduce((sum, value) => sum + Number(value || 0), 0);
   const totalDespesaResumo =
     custoTotal + massaSalarialTotal + encargosFolhaTotal + despesaAdmTotal + impostosTotal;
   const margemTotal = faturamentoMensal - totalDespesaResumo;
@@ -939,10 +961,14 @@ export default function LancamentosPage() {
                       </div>
                     </div>
 
-                    {section.key === 'resumo_financeiro' && !canEditFinancialSummary && (
-                      <div className="flex items-start gap-3 border-b border-destructive/30 bg-destructive/10 px-5 py-3 text-sm font-semibold text-destructive">
-                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>Acesso negado nesta secao. Somente o administrador de input pode alterar o Resumo Financeiro.</span>
+                    {section.key === 'resumo_financeiro' && (
+                      <div className="flex items-start gap-3 border-b border-primary/20 bg-primary/5 px-5 py-3 text-sm font-semibold text-foreground">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                        <span>
+                          Apenas <strong>Massa Salarial</strong> e manual. Os campos <strong>Encargos</strong>,
+                          <strong> Despesa Adm.</strong> e <strong>Impostos</strong> sao calculados automaticamente
+                          com base no faturamento e na massa salarial.
+                        </span>
                       </div>
                     )}
 
@@ -1008,7 +1034,17 @@ export default function LancamentosPage() {
                         </thead>
                         <tbody>
                           {section.rows.map((row) => {
-                            const values = entryValues[`${section.key}:${row.key}`] || [0, 0, 0, 0, 0];
+                            const isAutoFinancialRow =
+                              section.key === 'resumo_financeiro' &&
+                              ['encargos_folha', 'despesa_adm', 'impostos'].includes(row.key);
+                            const values =
+                              section.key === 'resumo_financeiro' && row.key === 'encargos_folha'
+                                ? encargosFolhaWeekly
+                                : section.key === 'resumo_financeiro' && row.key === 'despesa_adm'
+                                  ? despesaAdmWeekly
+                                  : section.key === 'resumo_financeiro' && row.key === 'impostos'
+                                    ? impostosWeekly
+                                    : entryValues[`${section.key}:${row.key}`] || [0, 0, 0, 0, 0];
                             const total = values.reduce((sum, value) => sum + Number(value || 0), 0);
                             const isParcelRow = row.key.startsWith('parcelas_');
                             const rowParcelInfo = parcelInfo[row.key] || { current: '', total: '' };
@@ -1051,14 +1087,16 @@ export default function LancamentosPage() {
                                       value={value === 0 ? '' : value}
                                       disabled={
                                         !canEditLaunchValues ||
-                                        (section.key === 'resumo_financeiro' && !canEditFinancialSummary) ||
+                                        (section.key === 'resumo_financeiro' && row.key !== 'massa_salarial') ||
                                         (!canValidateColumns && validatedColumnsMap.has(`${section.key}:${weekIndex}`))
                                       }
                                       onChange={(event) =>
                                         updateValue(section.key, row.key, weekIndex, event.target.value)
                                       }
                                       placeholder="0,00"
-                                      className="w-28 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted"
+                                      className={`w-28 rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted ${
+                                        isAutoFinancialRow ? 'font-semibold text-muted-foreground' : ''
+                                      }`}
                                     />
                                   </td>
                                 ))}

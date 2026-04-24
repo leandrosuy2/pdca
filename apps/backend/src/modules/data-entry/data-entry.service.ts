@@ -24,6 +24,13 @@ type ValidateColumnPayload = {
 export class DataEntryService {
   constructor(private prisma: PrismaService) {}
 
+  private readonly financialSummarySectionKey = 'resumo_financeiro';
+  private readonly receitaSectionKey = 'receita';
+  private readonly massaSalarialRowKey = 'massa_salarial';
+  private readonly encargosFolhaRowKey = 'encargos_folha';
+  private readonly despesaAdmRowKey = 'despesa_adm';
+  private readonly impostosRowKey = 'impostos';
+
   private isAdmin(user: any) {
     return String(user?.role || '').toUpperCase() === 'ADMIN';
   }
@@ -50,6 +57,52 @@ export class DataEntryService {
 
   private getValidatedColumnKey(sectionKey: string, weekIndex: number) {
     return `${sectionKey}:${weekIndex}`;
+  }
+
+  private roundCurrency(value: number) {
+    return Number(Number(value || 0).toFixed(2));
+  }
+
+  private getEntryMapValue(entryMap: Map<string, number[]>, sectionKey: string, rowKey: string) {
+    return entryMap.get(`${sectionKey}:${rowKey}`) || [0, 0, 0, 0, 0];
+  }
+
+  private getSectionWeeklyTotals(entryMap: Map<string, number[]>, sectionKey: string) {
+    const section = DATA_ENTRY_TEMPLATE.find((item) => item.key === sectionKey);
+    const totals = [0, 0, 0, 0, 0];
+
+    if (!section) return totals;
+
+    for (const row of section.rows) {
+      const values = this.getEntryMapValue(entryMap, sectionKey, row.key);
+      for (let index = 0; index < 5; index += 1) {
+        totals[index] += Number(values[index] || 0);
+      }
+    }
+
+    return totals.map((value) => this.roundCurrency(value));
+  }
+
+  private applyAutomaticFinancialSummary(entryMap: Map<string, number[]>) {
+    const receitaWeekly = this.getSectionWeeklyTotals(entryMap, this.receitaSectionKey);
+    const massaSalarialWeekly = this.getEntryMapValue(
+      entryMap,
+      this.financialSummarySectionKey,
+      this.massaSalarialRowKey,
+    ).map((value) => this.roundCurrency(Number(value || 0)));
+
+    entryMap.set(
+      `${this.financialSummarySectionKey}:${this.encargosFolhaRowKey}`,
+      massaSalarialWeekly.map((value) => this.roundCurrency(value * 1.05)),
+    );
+    entryMap.set(
+      `${this.financialSummarySectionKey}:${this.despesaAdmRowKey}`,
+      receitaWeekly.map((value) => this.roundCurrency(value * 0.07)),
+    );
+    entryMap.set(
+      `${this.financialSummarySectionKey}:${this.impostosRowKey}`,
+      receitaWeekly.map((value) => this.roundCurrency(value * 0.096)),
+    );
   }
 
   private ensureCanUseDataEntry(user: any) {
@@ -436,6 +489,8 @@ export class DataEntryService {
       manualMap.set(key, current);
     }
 
+    this.applyAutomaticFinancialSummary(manualMap);
+
     return {
       unit: {
         id: unit.id,
@@ -523,9 +578,21 @@ export class DataEntryService {
       .map((entry) => {
         const section = sectionMap.get(String(entry.sectionKey || ''));
         if (!section) return null;
-        if (section.key === 'resumo_financeiro' && !this.canEditFinancialSummary(user)) return null;
         const row = section.rows.find((item) => item.key === String(entry.rowKey || ''));
         if (!row) return null;
+        if (
+          section.key === this.financialSummarySectionKey &&
+          row.key !== this.massaSalarialRowKey &&
+          !this.canEditFinancialSummary(user)
+        ) {
+          return null;
+        }
+        if (
+          section.key === this.financialSummarySectionKey &&
+          row.key !== this.massaSalarialRowKey
+        ) {
+          return null;
+        }
         const weeklyValues = Array.from({ length: 5 }, (_, index) => {
           const value = Number(entry.weeklyValues?.[index] || 0);
           return Number.isFinite(value) ? value : 0;
@@ -538,6 +605,31 @@ export class DataEntryService {
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+    const entryValueMap = new Map<string, number[]>();
+    for (const entry of sanitizedEntries) {
+      entryValueMap.set(`${entry.section.key}:${entry.row.key}`, entry.weeklyValues);
+    }
+    this.applyAutomaticFinancialSummary(entryValueMap);
+
+    const automaticFinancialRows = [
+      this.encargosFolhaRowKey,
+      this.despesaAdmRowKey,
+      this.impostosRowKey,
+    ].map((rowKey) => {
+      const section = sectionMap.get(this.financialSummarySectionKey)!;
+      const row = section.rows.find((item) => item.key === rowKey)!;
+      return {
+        section,
+        row,
+        weeklyValues: this.getEntryMapValue(entryValueMap, this.financialSummarySectionKey, rowKey),
+      };
+    });
+
+    const persistedEntries = [
+      ...sanitizedEntries,
+      ...automaticFinancialRows,
+    ];
 
     await this.prisma.$transaction(async (tx) => {
       const existingManualTransactions = await tx.transacao.findMany({
@@ -560,7 +652,10 @@ export class DataEntryService {
           const [, sectionKey, , weekMarker] = parts;
           const weekIndex = Math.max(0, Math.min(4, Number(weekMarker.replace('W', '')) - 1));
 
-          if (sectionKey === 'resumo_financeiro' && !this.canEditFinancialSummary(user)) {
+          if (
+            sectionKey === this.financialSummarySectionKey &&
+            !this.canEditFinancialSummary(user)
+          ) {
             return false;
           }
 
@@ -589,7 +684,7 @@ export class DataEntryService {
         categoryKeys.set(`${category.name}::${category.type}`, { id: category.id });
       }
 
-      for (const entry of sanitizedEntries) {
+      for (const entry of persistedEntries) {
         const categoryKey = `${entry.section.categoryName}::${entry.section.type}`;
         let category = categoryKeys.get(categoryKey);
         if (!category) {
