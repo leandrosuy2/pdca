@@ -1,0 +1,4 @@
+• turbo 2.9.6
+ ERROR  @pdca/api#dev: command (C:\pdca-main\apps\backend) C:\Program Files\nodejs\npm.cmd run dev exited (-1073741510)
+ ERROR  run failed: command  exited (-1073741510)
+^C

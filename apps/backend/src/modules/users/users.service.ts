@@ -32,6 +32,12 @@ export class UsersService {
         role: true,
         template: true,
         active: true,
+        launchUnit: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         createdAt: true,
         updatedAt: true,
       },
@@ -52,6 +58,12 @@ export class UsersService {
         role: true,
         template: true,
         active: true,
+        launchUnit: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -85,6 +97,7 @@ export class UsersService {
         template,
         templateMeta: DASHBOARD_TEMPLATE_DEFINITIONS[template],
         active: u.active,
+        launchUnit: u.launchUnit,
         createdAt: u.createdAt,
         updatedAt: u.updatedAt,
         transactionCount: u._count.transacoes,
@@ -109,6 +122,19 @@ export class UsersService {
         role: true,
         template: true,
         active: true,
+        launchUnit: {
+          select: {
+            id: true,
+            name: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+              },
+            },
+          },
+        },
         createdAt: true,
         updatedAt: true,
         _count: {
@@ -197,18 +223,46 @@ export class UsersService {
     const role = String(payload.role || 'USER').toUpperCase();
     const template = normalizeDashboardTemplate(payload.template);
     const active = payload.active !== false;
+    const launchUnitId = payload.launchUnitId ? String(payload.launchUnitId).trim() : null;
 
     if (!name || !email || !password) {
       throw new BadRequestException('Nome, e-mail e senha sao obrigatorios.');
     }
 
-    if (!['ADMIN', 'USER', 'DATA_ENTRY'].includes(role)) {
-      throw new BadRequestException('Perfil invalido. Use ADMIN, USER ou DATA_ENTRY.');
+    if (!['ADMIN', 'USER', 'DATA_ENTRY', 'UNIT_ENTRY'].includes(role)) {
+      throw new BadRequestException('Perfil invalido. Use ADMIN, USER, DATA_ENTRY ou UNIT_ENTRY.');
+    }
+
+    if (role === 'UNIT_ENTRY' && !launchUnitId) {
+      throw new BadRequestException('Usuarios UNIT_ENTRY precisam de uma unidade vinculada.');
     }
 
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
       throw new BadRequestException('Ja existe um usuario com este e-mail.');
+    }
+
+    if (launchUnitId) {
+      const unit = await this.prisma.unidade.findUnique({
+        where: { id: launchUnitId },
+        select: {
+          id: true,
+          name: true,
+          launchInputUser: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (!unit) {
+        throw new BadRequestException('Unidade vinculada nao encontrada.');
+      }
+
+      if (unit.launchInputUser) {
+        throw new BadRequestException('Esta unidade ja possui um usuario de lancamento vinculado.');
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -221,6 +275,7 @@ export class UsersService {
         role,
         template,
         active,
+        launchUnitId,
       },
       select: {
         id: true,
@@ -229,6 +284,12 @@ export class UsersService {
         role: true,
         template: true,
         active: true,
+        launchUnit: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         createdAt: true,
         updatedAt: true,
       },

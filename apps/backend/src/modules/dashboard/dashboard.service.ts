@@ -37,6 +37,10 @@ export class DashboardService {
     return String(user?.role || '').toUpperCase() === 'DATA_ENTRY';
   }
 
+  private isUnitEntryUser(user: any) {
+    return String(user?.role || '').toUpperCase() === 'UNIT_ENTRY';
+  }
+
   private normalizeText(value: any) {
     return String(value || '')
       .normalize('NFD')
@@ -168,7 +172,7 @@ export class DashboardService {
   }
 
   private async ensureDefaultDashboard(user: any) {
-    if (this.isDataEntryUser(user)) {
+    if (this.isDataEntryUser(user) || this.isUnitEntryUser(user)) {
       return null;
     }
 
@@ -207,7 +211,7 @@ export class DashboardService {
 
   private async resolveDashboardContext(user: any, dashboardId?: string) {
     if (!dashboardId) {
-      if (this.isDataEntryUser(user)) {
+      if (this.isDataEntryUser(user) || this.isUnitEntryUser(user)) {
         throw new ForbiddenException('Perfil de input nao possui dashboard proprio.');
       }
       const dashboard = await this.ensureDefaultDashboard(user);
@@ -237,7 +241,7 @@ export class DashboardService {
   }
 
   async listDashboards(user: any) {
-    if (this.isDataEntryUser(user)) {
+    if (this.isDataEntryUser(user) || this.isUnitEntryUser(user)) {
       return { dashboards: [] };
     }
 
@@ -247,7 +251,7 @@ export class DashboardService {
         where: {
           owner: {
             role: {
-              not: 'DATA_ENTRY',
+              notIn: ['DATA_ENTRY', 'UNIT_ENTRY'],
             },
           },
         },
@@ -1399,14 +1403,36 @@ export class DashboardService {
     }
   }
 
-  async getAdminGlobalConsolidated(user: any, yearStr?: string) {
+  private buildAdminGestaoWhere(start: Date, end: Date, gestao?: string) {
+    const normalizedGestao = String(gestao || '').trim();
+    return {
+      date: { gte: start, lt: end },
+      ...(normalizedGestao ? { gestora: normalizedGestao } : {}),
+    };
+  }
+
+  private async getAdminManagements(start: Date, end: Date) {
+    const rows = await this.prisma.transacao.findMany({
+      where: { date: { gte: start, lt: end } },
+      select: { gestora: true },
+      distinct: ['gestora'],
+      orderBy: { gestora: 'asc' },
+    });
+
+    return rows
+      .map((row) => String(row.gestora || '').trim())
+      .filter(Boolean)
+      .filter((value, index, array) => array.indexOf(value) === index);
+  }
+
+  async getAdminGlobalConsolidated(user: any, yearStr?: string, gestao?: string) {
     this.ensureAdminAnalytics(user);
     const y = yearStr && /^\d{4}$/.test(yearStr) ? Number(yearStr) : new Date().getUTCFullYear();
     const start = new Date(Date.UTC(y, 0, 1));
     const end = new Date(Date.UTC(y + 1, 0, 1));
 
     const txs = await this.prisma.transacao.findMany({
-      where: { date: { gte: start, lt: end } },
+      where: this.buildAdminGestaoWhere(start, end, gestao),
       include: { categoria: true },
     });
 
@@ -1466,7 +1492,7 @@ export class DashboardService {
     return { year: y, months, alerts };
   }
 
-  async getAdminUserRanking(user: any, yearStr?: string) {
+  async getAdminUserRanking(user: any, yearStr?: string, gestao?: string) {
     this.ensureAdminAnalytics(user);
     const y = yearStr && /^\d{4}$/.test(yearStr) ? Number(yearStr) : new Date().getUTCFullYear();
     const start = new Date(Date.UTC(y, 0, 1));
@@ -1474,44 +1500,48 @@ export class DashboardService {
     const prevStart = new Date(Date.UTC(y - 1, 0, 1));
     const prevEnd = new Date(Date.UTC(y, 0, 1));
 
-    const users = await this.prisma.user.findMany({
-      select: { id: true, name: true, email: true, active: true, role: true },
+    const currentTxs = await this.prisma.transacao.findMany({
+      where: this.buildAdminGestaoWhere(start, end, gestao),
+      select: {
+        gestora: true,
+        amount: true,
+        type: true,
+      },
+    });
+    const prevTxs = await this.prisma.transacao.findMany({
+      where: this.buildAdminGestaoWhere(prevStart, prevEnd, gestao),
+      select: {
+        gestora: true,
+        amount: true,
+        type: true,
+      },
     });
 
-    const sumsCurrent = await this.prisma.transacao.groupBy({
-      by: ['userId'],
-      where: { type: 'RECEITA', date: { gte: start, lt: end } },
-      _sum: { amount: true },
-    });
-    const sumsPrev = await this.prisma.transacao.groupBy({
-      by: ['userId'],
-      where: { type: 'RECEITA', date: { gte: prevStart, lt: prevEnd } },
-      _sum: { amount: true },
-    });
-    const desCurrent = await this.prisma.transacao.groupBy({
-      by: ['userId'],
-      where: { type: 'DESPESA', date: { gte: start, lt: end } },
-      _sum: { amount: true },
-    });
+    const currentMap = new Map<string, { faturamento: number; despesa: number }>();
+    const previousRevenueMap = new Map<string, number>();
 
-    const curM = new Map<string, number>(sumsCurrent.map((x) => [x.userId, Number(x._sum.amount || 0)]));
-    const prevM = new Map<string, number>(sumsPrev.map((x) => [x.userId, Number(x._sum.amount || 0)]));
-    const desM = new Map<string, number>(desCurrent.map((x) => [x.userId, Number(x._sum.amount || 0)]));
+    for (const tx of currentTxs) {
+      const gestoraName = String(tx.gestora || '').trim() || 'Sem Gestora';
+      if (!currentMap.has(gestoraName)) currentMap.set(gestoraName, { faturamento: 0, despesa: 0 });
+      const row = currentMap.get(gestoraName)!;
+      if (String(tx.type || '').toUpperCase() === 'RECEITA') row.faturamento += Number(tx.amount || 0);
+      if (String(tx.type || '').toUpperCase() === 'DESPESA') row.despesa += Number(tx.amount || 0);
+    }
 
-    const ranking = users
-      .map((u) => {
-        const rec = curM.get(u.id) || 0;
-        const prev = prevM.get(u.id) || 0;
-        const des = desM.get(u.id) || 0;
-        const growthYoY = prev > 0 ? (rec - prev) / prev : rec > 0 ? 1 : 0;
-        const efficiency = this.divideSafely(rec, des + 1);
+    for (const tx of prevTxs) {
+      if (String(tx.type || '').toUpperCase() !== 'RECEITA') continue;
+      const gestoraName = String(tx.gestora || '').trim() || 'Sem Gestora';
+      previousRevenueMap.set(gestoraName, (previousRevenueMap.get(gestoraName) || 0) + Number(tx.amount || 0));
+    }
+
+    const ranking = Array.from(currentMap.entries())
+      .map(([gestaoName, totals]) => {
+        const prev = previousRevenueMap.get(gestaoName) || 0;
+        const growthYoY = prev > 0 ? (totals.faturamento - prev) / prev : totals.faturamento > 0 ? 1 : 0;
+        const efficiency = this.divideSafely(totals.faturamento, totals.despesa + 1);
         return {
-          userId: u.id,
-          name: u.name,
-          email: u.email,
-          active: u.active,
-          role: u.role,
-          faturamento: rec,
+          gestao: gestaoName,
+          faturamento: totals.faturamento,
           growthYoY,
           efficiency,
         };
@@ -1522,14 +1552,14 @@ export class DashboardService {
     return { year: y, ranking };
   }
 
-  async getAdminQuarterly(user: any, yearStr?: string) {
+  async getAdminQuarterly(user: any, yearStr?: string, gestao?: string) {
     this.ensureAdminAnalytics(user);
     const y = yearStr && /^\d{4}$/.test(yearStr) ? Number(yearStr) : new Date().getUTCFullYear();
     const start = new Date(Date.UTC(y, 0, 1));
     const end = new Date(Date.UTC(y + 1, 0, 1));
 
     const txs = await this.prisma.transacao.findMany({
-      where: { date: { gte: start, lt: end } },
+      where: this.buildAdminGestaoWhere(start, end, gestao),
       include: { categoria: true },
     });
 
@@ -1558,6 +1588,7 @@ export class DashboardService {
       .map(([key, v]) => ({
         key,
         faturamento: v.receita,
+        despesaTotal: v.despesa,
         fopeg: v.fopeg,
         turnoverPct: this.divideSafely(v.despesa - v.fopeg, v.receita) * 100,
         margemPct: this.divideSafely(v.receita - v.despesa, v.receita) * 100,
@@ -1566,12 +1597,16 @@ export class DashboardService {
     return { year: y, quarters };
   }
 
-  async getAdminInteligencia(user: any, yearStr?: string) {
+  async getAdminInteligencia(user: any, yearStr?: string, gestao?: string) {
     this.ensureAdminAnalytics(user);
-    const [consolidated, ranking, quarterly] = await Promise.all([
-      this.getAdminGlobalConsolidated(user, yearStr),
-      this.getAdminUserRanking(user, yearStr),
-      this.getAdminQuarterly(user, yearStr),
+    const y = yearStr && /^\d{4}$/.test(yearStr) ? Number(yearStr) : new Date().getUTCFullYear();
+    const start = new Date(Date.UTC(y, 0, 1));
+    const end = new Date(Date.UTC(y + 1, 0, 1));
+    const [managements, consolidated, ranking, quarterly] = await Promise.all([
+      this.getAdminManagements(start, end),
+      this.getAdminGlobalConsolidated(user, yearStr, gestao),
+      this.getAdminUserRanking(user, yearStr, gestao),
+      this.getAdminQuarterly(user, yearStr, gestao),
     ]);
 
     const ms = consolidated.months;
@@ -1592,6 +1627,13 @@ export class DashboardService {
       ];
     }
 
-    return { ...consolidated, ranking: ranking.ranking, quarters: quarterly.quarters, forecast };
+    return {
+      ...consolidated,
+      selectedGestao: String(gestao || '').trim() || null,
+      managements,
+      ranking: ranking.ranking,
+      quarters: quarterly.quarters,
+      forecast,
+    };
   }
 }

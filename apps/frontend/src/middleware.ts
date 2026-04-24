@@ -13,7 +13,7 @@ function decodeTokenRole(token: string) {
 }
 
 function getLandingPath(role: string) {
-  if (role === 'DATA_ENTRY') return '/lancamentos';
+  if (role === 'DATA_ENTRY' || role === 'UNIT_ENTRY') return '/lancamentos';
   if (role === 'ADMIN') return '/admin/inteligencia';
   return '/dashboard';
 }
@@ -25,6 +25,7 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get('token')?.value || '';
   const role = decodeTokenRole(token);
   const isDataEntry = role === 'DATA_ENTRY';
+  const isUnitEntry = role === 'UNIT_ENTRY';
   const isAdmin = role === 'ADMIN';
   const landingPath = getLandingPath(role);
 
@@ -47,11 +48,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.nextUrl));
   }
 
-  if (token && isDataEntry && (path.startsWith('/dashboard') || path.startsWith('/dashboards') || path.startsWith('/admin'))) {
+  if (token && (isDataEntry || isUnitEntry) && (path.startsWith('/dashboard') || path.startsWith('/dashboards') || path.startsWith('/admin'))) {
     return NextResponse.redirect(new URL('/lancamentos', request.nextUrl));
   }
 
-  if (token && !isDataEntry && path.startsWith('/lancamentos')) {
+  if (token && !isDataEntry && !isUnitEntry && path.startsWith('/lancamentos')) {
     return NextResponse.redirect(new URL(landingPath, request.nextUrl));
   }
 

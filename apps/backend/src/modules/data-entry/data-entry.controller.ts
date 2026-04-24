@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { DataEntryService } from './data-entry.service';
@@ -25,6 +25,20 @@ export class DataEntryController {
   @Get('launches')
   getLaunches(@CurrentUser() user: any, @Query('dashboardId') dashboardId?: string) {
     return this.dataEntryService.getLaunches(user, dashboardId);
+  }
+
+  @Delete('monthly')
+  deleteMonthlyInput(
+    @CurrentUser() user: any,
+    @Query('unitId') unitId: string,
+    @Query('month') month: string,
+  ) {
+    return this.dataEntryService.deleteMonthlyInput(user, unitId, month);
+  }
+
+  @Post('validate-column')
+  validateColumn(@CurrentUser() user: any, @Body() payload: Record<string, any>) {
+    return this.dataEntryService.validateColumn(user, payload);
   }
 
   @Post('monthly')

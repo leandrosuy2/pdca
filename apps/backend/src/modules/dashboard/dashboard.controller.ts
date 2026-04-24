@@ -10,8 +10,12 @@ export class DashboardController {
   constructor(private dashboardService: DashboardService) {}
 
   @Get('admin/inteligencia')
-  getAdminInteligencia(@CurrentUser() user: any, @Query('year') year?: string) {
-    return this.dashboardService.getAdminInteligencia(user, year);
+  getAdminInteligencia(
+    @CurrentUser() user: any,
+    @Query('year') year?: string,
+    @Query('gestao') gestao?: string,
+  ) {
+    return this.dashboardService.getAdminInteligencia(user, year, gestao);
   }
 
   @Get('catalog')

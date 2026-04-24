@@ -14,22 +14,25 @@ enum DashboardTemplate {
 }
 
 model User {
-  id        String      @id @default(uuid())
-  name      String
-  email     String      @unique
-  password  String
-  role      String      @default("USER")
-  template  DashboardTemplate @default(RESTAURANTE)
-  active    Boolean     @default(true)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id           String            @id @default(uuid())
+  name         String
+  email        String            @unique
+  password     String
+  role         String            @default("USER")
+  template     DashboardTemplate @default(RESTAURANTE)
+  active       Boolean           @default(true)
+  launchUnitId String?           @unique
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
 
-  gestoras     Gestora[]
-  unidades     Unidade[]
-  categorias   Categoria[]
-  transacoes   Transacao[]
-  dashboards   Dashboard[]       @relation("DashboardOwner")
+  gestoras        Gestora[]
+  unidades        Unidade[]
+  categorias      Categoria[]
+  transacoes      Transacao[]
+  validatedInputColumns InputColumnValidation[] @relation("ValidatedByUser")
+  dashboards      Dashboard[]       @relation("DashboardOwner")
   dashboardAccess DashboardAccess[]
+  launchUnit      Unidade?          @relation("LaunchUnitAssignment", fields: [launchUnitId], references: [id], onDelete: SetNull)
 }
 
 model Gestora {
@@ -73,18 +76,36 @@ model DashboardAccess {
 }
 
 model Unidade {
-  id        String      @id @default(uuid())
-  name      String
-  userId    String
-  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  gestoraId String?
-  gestora   Gestora?    @relation(fields: [gestoraId], references: [id], onDelete: SetNull)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id              String   @id @default(uuid())
+  name            String
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gestoraId       String?
+  gestora         Gestora? @relation(fields: [gestoraId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  transacoes Transacao[]
+  transacoes      Transacao[]
+  inputColumnValidations InputColumnValidation[]
+  launchInputUser User?    @relation("LaunchUnitAssignment")
 
   @@unique([userId, name])
+}
+
+model InputColumnValidation {
+  id            String   @id @default(uuid())
+  unitId        String
+  unit          Unidade  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  month         String
+  sectionKey    String
+  weekIndex     Int
+  validatedById String
+  validatedBy   User     @relation("ValidatedByUser", fields: [validatedById], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([unitId, month, sectionKey, weekIndex])
+  @@index([unitId, month])
 }
 
 model Categoria {

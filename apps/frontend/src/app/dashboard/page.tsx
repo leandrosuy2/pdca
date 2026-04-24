@@ -2865,15 +2865,17 @@ function DashboardContent() {
       units[0] ||
       null;
     const currentTemplate = dataEntryMonthly?.template || dataEntryContext?.template || [];
-    const currentUserId = String(currentUser?.sub || currentUser?.id || '');
-    const canEditData =
-      String(currentUser?.role || '').toUpperCase() === 'ADMIN' ||
-      String(currentUser?.role || '').toUpperCase() === 'DATA_ENTRY' ||
-      currentUserId === String(currentDashboard?.owner?.id || '');
+    const canEditData = Boolean(dataEntryContext?.permissions?.canEditLaunchValues);
 
     return (
       <div style={{ display: 'grid', gap: 18 }}>
         <div style={s.card}>
+          {!canEditData && (
+            <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 10, border: `1px solid ${PALETTE.vermelho}`, background: `${PALETTE.vermelho}18`, color: PALETTE.vermelho, fontSize: 13, fontWeight: 700 }}>
+              Acesso negado para alteracao. Somente o administrador de input pode editar estes valores.
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' as const }}>
             <div>
               <div style={s.titulo}>DADOS INPUTADOS</div>
@@ -2881,30 +2883,36 @@ function DashboardContent() {
                 Ajuste mensal por unidade
               </div>
               <div style={{ color: PALETTE.textoSec, fontSize: 13, marginTop: 6, maxWidth: 760 }}>
-                Aqui as gestoras podem revisar os dados que ja foram lancados. A unidade escolhida continua vinculada automaticamente a sua gestora-base.
+                Aqui os dados mensais ja lancados ficam disponiveis para consulta. Somente o administrador de input pode alterar esses valores.
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={saveDataEntryMonthly}
-              disabled={!canEditData || dataEntrySaving || !dataEntryUnitId}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                border: 'none',
-                borderRadius: 12,
-                padding: '12px 18px',
-                background: !canEditData || dataEntrySaving || !dataEntryUnitId ? PALETTE.cinzaClaro : PALETTE.azul,
-                color: !canEditData || dataEntrySaving || !dataEntryUnitId ? PALETTE.textoSec : '#fff',
-                fontWeight: 700,
-                cursor: !canEditData || dataEntrySaving || !dataEntryUnitId ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {dataEntrySaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-              Salvar dados
-            </button>
+            {canEditData ? (
+              <button
+                type="button"
+                onClick={saveDataEntryMonthly}
+                disabled={!canEditData || dataEntrySaving || !dataEntryUnitId}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  border: 'none',
+                  borderRadius: 12,
+                  padding: '12px 18px',
+                  background: !canEditData || dataEntrySaving || !dataEntryUnitId ? PALETTE.cinzaClaro : PALETTE.azul,
+                  color: !canEditData || dataEntrySaving || !dataEntryUnitId ? PALETTE.textoSec : '#fff',
+                  fontWeight: 700,
+                  cursor: !canEditData || dataEntrySaving || !dataEntryUnitId ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {dataEntrySaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
+                Salvar dados
+              </button>
+            ) : (
+              <div style={{ color: PALETTE.vermelho, fontSize: 12, fontWeight: 800, maxWidth: 260, textAlign: 'right' }}>
+                Acesso negado para edicao
+              </div>
+            )}
           </div>
 
           <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', marginTop: 22 }}>

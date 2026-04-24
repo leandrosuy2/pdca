@@ -11,7 +11,7 @@ import { Lock, Mail, Loader2 } from 'lucide-react';
 
 const getPostLoginPath = (role: unknown) => {
   const normalized = String(role || '').toUpperCase();
-  if (normalized === 'DATA_ENTRY') return '/lancamentos';
+  if (normalized === 'DATA_ENTRY' || normalized === 'UNIT_ENTRY') return '/lancamentos';
   if (normalized === 'ADMIN') return '/admin/inteligencia';
   return '/dashboard';
 };

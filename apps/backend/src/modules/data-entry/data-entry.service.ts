@@ -12,6 +12,14 @@ type SaveMonthlyPayload = {
   }>;
 };
 
+type ValidateColumnPayload = {
+  unitId?: string;
+  month?: string;
+  sectionKey?: string;
+  weekIndex?: number;
+  validated?: boolean;
+};
+
 @Injectable()
 export class DataEntryService {
   constructor(private prisma: PrismaService) {}
@@ -24,11 +32,54 @@ export class DataEntryService {
     return String(user?.role || '').toUpperCase() === 'DATA_ENTRY';
   }
 
+  private isUnitEntry(user: any) {
+    return String(user?.role || '').toUpperCase() === 'UNIT_ENTRY';
+  }
+
+  private isLaunchManager(user: any) {
+    return this.isAdmin(user) || this.isDataEntry(user);
+  }
+
+  private canEditLaunchValues(user: any) {
+    return this.isAdmin(user) || this.isDataEntry(user) || this.isUnitEntry(user);
+  }
+
+  private canEditFinancialSummary(user: any) {
+    return this.isAdmin(user) || this.isDataEntry(user);
+  }
+
+  private getValidatedColumnKey(sectionKey: string, weekIndex: number) {
+    return `${sectionKey}:${weekIndex}`;
+  }
+
   private ensureCanUseDataEntry(user: any) {
     const role = String(user?.role || '').toUpperCase();
-    if (!['ADMIN', 'DATA_ENTRY', 'USER'].includes(role)) {
+    if (!['ADMIN', 'DATA_ENTRY', 'USER', 'UNIT_ENTRY'].includes(role)) {
       throw new ForbiddenException('Acesso restrito ao fluxo de input mensal.');
     }
+  }
+
+  private async getAssignedUnit(user: any) {
+    if (!this.isUnitEntry(user)) return null;
+
+    const assignment = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        launchUnit: {
+          include: {
+            gestora: true,
+            user: true,
+          },
+        },
+      },
+    });
+
+    if (!assignment?.launchUnit) {
+      throw new ForbiddenException('Usuario de unidade sem unidade vinculada.');
+    }
+
+    return assignment.launchUnit;
   }
 
   private getMonthRange(month: string) {
@@ -51,6 +102,43 @@ export class DataEntryService {
   }
 
   private async getAccessibleDashboards(user: any, requireEdit = false) {
+    if (this.isUnitEntry(user)) {
+      const assignedUnit = await this.getAssignedUnit(user);
+      const ownerDashboard =
+        (await this.prisma.dashboard.findFirst({
+          where: {
+            ownerId: assignedUnit.userId,
+          },
+          include: {
+            owner: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                template: true,
+              },
+            },
+          },
+          orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+        })) || null;
+
+      if (!ownerDashboard) {
+        return [];
+      }
+
+      return [
+        {
+          ...ownerDashboard,
+          owner: ownerDashboard.owner
+            ? {
+                ...ownerDashboard.owner,
+                unidades: [assignedUnit],
+              }
+            : null,
+        },
+      ];
+    }
+
     if (this.isAdmin(user)) {
       return this.prisma.dashboard.findMany({
         include: {
@@ -120,6 +208,7 @@ export class DataEntryService {
     this.ensureCanUseDataEntry(user);
 
     const dashboards = await this.getAccessibleDashboards(user);
+    const assignedUnit = this.isUnitEntry(user) ? await this.getAssignedUnit(user) : null;
 
     return {
       user: {
@@ -127,6 +216,13 @@ export class DataEntryService {
         name: user.name,
         email: user.email,
         role: user.role,
+      },
+      permissions: {
+        canManageAllLaunches: this.isLaunchManager(user),
+        canDeleteLaunches: this.isLaunchManager(user),
+        canEditLaunchValues: this.canEditLaunchValues(user),
+        canEditFinancialSummary: this.canEditFinancialSummary(user),
+        assignedUnitId: assignedUnit?.id || null,
       },
       template: DATA_ENTRY_TEMPLATE,
       dashboards: dashboards.map((dashboard) => ({
@@ -167,6 +263,8 @@ export class DataEntryService {
       return { launches: [] };
     }
 
+    const assignedUnit = this.isUnitEntry(user) ? await this.getAssignedUnit(user) : null;
+
     const dashboardByOwnerId = new Map(
       filteredDashboards.map((dashboard) => [
         dashboard.ownerId,
@@ -181,6 +279,7 @@ export class DataEntryService {
     const transactions = await this.prisma.transacao.findMany({
       where: {
         userId: { in: ownerIds },
+        ...(assignedUnit ? { unidadeId: assignedUnit.id } : {}),
         description: { startsWith: 'INPUT|' },
       },
       include: {
@@ -273,23 +372,45 @@ export class DataEntryService {
       throw new NotFoundException('Unidade nao encontrada.');
     }
 
+    const assignedUnit = await this.getAssignedUnit(user);
     const accessibleOwnerIds = await this.getAccessibleOwnerIds(user);
-    if (!this.isAdmin(user) && !accessibleOwnerIds.has(unit.userId)) {
+    if (assignedUnit && assignedUnit.id !== unit.id) {
+      throw new ForbiddenException('Voce nao pode visualizar lancamentos de outra unidade.');
+    }
+    if (!this.isAdmin(user) && !assignedUnit && !accessibleOwnerIds.has(unit.userId)) {
       throw new ForbiddenException('Voce nao pode lancar dados para esta unidade.');
     }
 
     const { start, end } = this.getMonthRange(month);
-    const transactions = await this.prisma.transacao.findMany({
-      where: {
-        userId: unit.userId,
-        unidadeId: unit.id,
-        date: { gte: start, lt: end },
-      },
-      include: {
-        categoria: true,
-      },
-      orderBy: { date: 'asc' },
-    });
+    const [transactions, validations] = await Promise.all([
+      this.prisma.transacao.findMany({
+        where: {
+          userId: unit.userId,
+          unidadeId: unit.id,
+          date: { gte: start, lt: end },
+        },
+        include: {
+          categoria: true,
+        },
+        orderBy: { date: 'asc' },
+      }),
+      this.prisma.inputColumnValidation.findMany({
+        where: {
+          unitId: unit.id,
+          month,
+        },
+        include: {
+          validatedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: [{ sectionKey: 'asc' }, { weekIndex: 'asc' }],
+      }),
+    ]);
 
     const summary = transactions.reduce(
       (acc, transaction) => {
@@ -333,6 +454,12 @@ export class DataEntryService {
         despesa: summary.despesa,
         resultado: summary.receita - summary.despesa,
       },
+      validatedColumns: validations.map((item) => ({
+        sectionKey: item.sectionKey,
+        weekIndex: item.weekIndex,
+        validatedAt: item.updatedAt.toISOString(),
+        validatedBy: item.validatedBy,
+      })),
       entries: DATA_ENTRY_TEMPLATE.flatMap((section) =>
         section.rows.map((row) => ({
           sectionKey: section.key,
@@ -345,6 +472,10 @@ export class DataEntryService {
 
   async saveMonthlyInput(user: any, payload: SaveMonthlyPayload) {
     this.ensureCanUseDataEntry(user);
+
+    if (!this.canEditLaunchValues(user)) {
+      throw new ForbiddenException('Somente o administrador de input pode alterar os valores lancados.');
+    }
 
     const unitId = String(payload?.unitId || '').trim();
     const month = String(payload?.month || '').trim();
@@ -363,18 +494,36 @@ export class DataEntryService {
       throw new NotFoundException('Unidade nao encontrada.');
     }
 
+    const assignedUnit = await this.getAssignedUnit(user);
     const accessibleOwnerIds = await this.getAccessibleOwnerIds(user, true);
-    if (!this.isAdmin(user) && !accessibleOwnerIds.has(unit.userId)) {
+    if (assignedUnit && assignedUnit.id !== unit.id) {
+      throw new ForbiddenException('Voce nao pode salvar dados em outra unidade.');
+    }
+    if (!this.isAdmin(user) && !assignedUnit && !accessibleOwnerIds.has(unit.userId)) {
       throw new ForbiddenException('Voce nao pode salvar dados para esta unidade.');
     }
 
     const { start, end, year, monthIndex } = this.getMonthRange(month);
     const sectionMap = new Map(DATA_ENTRY_TEMPLATE.map((section) => [section.key, section]));
+    const validations = await this.prisma.inputColumnValidation.findMany({
+      where: {
+        unitId: unit.id,
+        month,
+      },
+      select: {
+        sectionKey: true,
+        weekIndex: true,
+      },
+    });
+    const validatedColumns = new Set(
+      validations.map((item) => this.getValidatedColumnKey(item.sectionKey, item.weekIndex)),
+    );
 
     const sanitizedEntries = entries
       .map((entry) => {
         const section = sectionMap.get(String(entry.sectionKey || ''));
         if (!section) return null;
+        if (section.key === 'resumo_financeiro' && !this.canEditFinancialSummary(user)) return null;
         const row = section.rows.find((item) => item.key === String(entry.rowKey || ''));
         if (!row) return null;
         const weeklyValues = Array.from({ length: 5 }, (_, index) => {
@@ -391,14 +540,45 @@ export class DataEntryService {
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.transacao.deleteMany({
+      const existingManualTransactions = await tx.transacao.findMany({
         where: {
           userId: unit.userId,
           unidadeId: unit.id,
           date: { gte: start, lt: end },
           description: { startsWith: 'INPUT|' },
         },
+        select: {
+          id: true,
+          description: true,
+        },
       });
+
+      const deletableIds = existingManualTransactions
+        .filter((transaction) => {
+          const parts = String(transaction.description || '').split('|');
+          if (parts.length !== 4) return true;
+          const [, sectionKey, , weekMarker] = parts;
+          const weekIndex = Math.max(0, Math.min(4, Number(weekMarker.replace('W', '')) - 1));
+
+          if (sectionKey === 'resumo_financeiro' && !this.canEditFinancialSummary(user)) {
+            return false;
+          }
+
+          if (!this.isLaunchManager(user) && validatedColumns.has(this.getValidatedColumnKey(sectionKey, weekIndex))) {
+            return false;
+          }
+
+          return true;
+        })
+        .map((transaction) => transaction.id);
+
+      if (deletableIds.length > 0) {
+        await tx.transacao.deleteMany({
+          where: {
+            id: { in: deletableIds },
+          },
+        });
+      }
 
       const categoryKeys = new Map<string, { id: string }>();
       const existingCategories = await tx.categoria.findMany({
@@ -427,6 +607,9 @@ export class DataEntryService {
         const records = entry.weeklyValues
           .map((value, weekIndex) => {
             if (!value) return null;
+            if (!this.isLaunchManager(user) && validatedColumns.has(this.getValidatedColumnKey(entry.section.key, weekIndex))) {
+              return null;
+            }
             return {
               description: `INPUT|${entry.section.key}|${entry.row.key}|W${weekIndex + 1}`,
               gestora: unit.gestora?.name || 'Sem Gestora',
@@ -447,5 +630,125 @@ export class DataEntryService {
     });
 
     return this.getMonthlyInput(user, unit.id, month);
+  }
+
+  async validateColumn(user: any, payload: ValidateColumnPayload) {
+    this.ensureCanUseDataEntry(user);
+
+    if (!this.isLaunchManager(user)) {
+      throw new ForbiddenException('Somente o administrador de input pode validar colunas.');
+    }
+
+    const unitId = String(payload?.unitId || '').trim();
+    const month = String(payload?.month || '').trim();
+    const sectionKey = String(payload?.sectionKey || '').trim();
+    const weekIndex = Number(payload?.weekIndex);
+    const validated = payload?.validated !== false;
+
+    if (!unitId || !month || !sectionKey || !Number.isInteger(weekIndex) || weekIndex < 0 || weekIndex > 4) {
+      throw new BadRequestException('Dados invalidos para validacao da coluna.');
+    }
+
+    const unit = await this.prisma.unidade.findUnique({
+      where: { id: unitId },
+      include: { user: true },
+    });
+
+    if (!unit) {
+      throw new NotFoundException('Unidade nao encontrada.');
+    }
+
+    const accessibleOwnerIds = await this.getAccessibleOwnerIds(user, true);
+    if (!this.isAdmin(user) && !accessibleOwnerIds.has(unit.userId)) {
+      throw new ForbiddenException('Voce nao pode validar colunas desta unidade.');
+    }
+
+    const sectionExists = DATA_ENTRY_TEMPLATE.some((section) => section.key === sectionKey);
+    if (!sectionExists) {
+      throw new BadRequestException('Secao invalida para validacao.');
+    }
+
+    if (validated) {
+      await this.prisma.inputColumnValidation.upsert({
+        where: {
+          unitId_month_sectionKey_weekIndex: {
+            unitId,
+            month,
+            sectionKey,
+            weekIndex,
+          },
+        },
+        create: {
+          unitId,
+          month,
+          sectionKey,
+          weekIndex,
+          validatedById: user.id,
+        },
+        update: {
+          validatedById: user.id,
+        },
+      });
+    } else {
+      await this.prisma.inputColumnValidation.deleteMany({
+        where: {
+          unitId,
+          month,
+          sectionKey,
+          weekIndex,
+        },
+      });
+    }
+
+    return this.getMonthlyInput(user, unitId, month);
+  }
+
+  async deleteMonthlyInput(user: any, unitId: string, month: string) {
+    this.ensureCanUseDataEntry(user);
+
+    if (!this.isLaunchManager(user)) {
+      throw new ForbiddenException('Somente o administrador de lancamentos pode excluir lancamentos.');
+    }
+
+    const normalizedUnitId = String(unitId || '').trim();
+    const normalizedMonth = String(month || '').trim();
+
+    if (!normalizedUnitId || !normalizedMonth) {
+      throw new BadRequestException('Unidade e mes sao obrigatorios.');
+    }
+
+    const unit = await this.prisma.unidade.findUnique({
+      where: { id: normalizedUnitId },
+      include: { user: true },
+    });
+
+    if (!unit) {
+      throw new NotFoundException('Unidade nao encontrada.');
+    }
+
+    const accessibleOwnerIds = await this.getAccessibleOwnerIds(user, true);
+    if (!this.isAdmin(user) && !accessibleOwnerIds.has(unit.userId)) {
+      throw new ForbiddenException('Voce nao pode excluir dados desta unidade.');
+    }
+
+    const { start, end } = this.getMonthRange(normalizedMonth);
+    const deleted = await this.prisma.transacao.deleteMany({
+      where: {
+        userId: unit.userId,
+        unidadeId: unit.id,
+        date: { gte: start, lt: end },
+        description: { startsWith: 'INPUT|' },
+      },
+    });
+
+    return {
+      success: true,
+      deletedCount: deleted.count,
+      unit: {
+        id: unit.id,
+        name: unit.name,
+      },
+      month: normalizedMonth,
+    };
   }
 }

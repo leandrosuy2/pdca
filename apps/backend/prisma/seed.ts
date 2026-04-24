@@ -5,7 +5,7 @@
  * - cria os dashboards das diretoras Ellen e Raiclene
  * - registra a hierarquia Gestora > Unidade para servir de base futura
  */
-import { Prisma, PrismaClient } from '@prisma/client';
+import { DashboardTemplate, Prisma, PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -27,6 +27,10 @@ type SeedProfile = {
   receitaScale: number;
   months?: number;
 };
+
+function normalizeEmailPart(text: string) {
+  return slugBase(text).replace(/-+/g, '.');
+}
 
 function slugBase(text: string) {
   return text
@@ -273,11 +277,42 @@ async function seedUserData(owner: UserRow, profile: SeedProfile) {
 
   return {
     dashDefault,
+    owner,
+    unidadeRecords,
     gestoras: gestoraRecords.length,
     unidades: unidadeRecords.length,
     categorias: categorias.length,
     transacoes: transacoes.length,
   };
+}
+
+async function createUnitEntryUsers(
+  owner: UserRow & { template?: DashboardTemplate },
+  units: Array<{ id: string; name: string }>,
+  passwordHash: string,
+) {
+  let created = 0;
+
+  for (const unit of units) {
+    const email = `lanc.${normalizeEmailPart(owner.name || owner.email)}.${normalizeEmailPart(unit.name)}@pdca.com`;
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) continue;
+
+    await prisma.user.create({
+      data: {
+        email,
+        name: `Lancamento ${unit.name}`,
+        password: passwordHash,
+        role: 'UNIT_ENTRY',
+        template: owner.template || 'RESTAURANTE',
+        active: true,
+        launchUnitId: unit.id,
+      },
+    });
+    created += 1;
+  }
+
+  return created;
 }
 
 async function main() {
@@ -379,6 +414,9 @@ async function main() {
       },
     ],
   });
+
+  const createdEllenUnitUsers = await createUnitEntryUsers(ellen, ellenStats.unidadeRecords, passwordHash);
+  const createdRaicleneUnitUsers = await createUnitEntryUsers(raiclene, raicleneStats.unidadeRecords, passwordHash);
 
   const summary = await prisma.user.count();
   const tx = await prisma.transacao.count();
