@@ -162,6 +162,7 @@ export default function LancamentosPage() {
   const [selectedMonth, setSelectedMonth] = useState(currentMonthValue());
   const [monthlyData, setMonthlyData] = useState<MonthlyResponse | null>(null);
   const [entryValues, setEntryValues] = useState<Record<string, number[]>>({});
+  const [parcelInfo, setParcelInfo] = useState<Record<string, { current: string; total: string }>>({});
   const [editorMode, setEditorMode] = useState<'list' | 'form'>('list');
   const [expandedGestoras, setExpandedGestoras] = useState<string[]>([]);
   const [selectedListUnitId, setSelectedListUnitId] = useState('');
@@ -385,6 +386,25 @@ export default function LancamentosPage() {
     loadMonthly();
   }, [editorMode, selectedUnitId, selectedMonth]);
 
+  useEffect(() => {
+    setParcelInfo((current) => {
+      const next = { ...current };
+
+      for (const section of template) {
+        for (const row of section.rows) {
+          if (!row.key.startsWith('parcelas_') || next[row.key]) continue;
+          const match = row.label.match(/(\d+)\s*\/\s*(\d+)$/);
+          next[row.key] = {
+            current: match?.[1] || '',
+            total: match?.[2] || '',
+          };
+        }
+      }
+
+      return next;
+    });
+  }, [template]);
+
   const updateValue = (sectionKey: string, rowKey: string, weekIndex: number, rawValue: string) => {
     const parsed = Number(rawValue);
     const key = `${sectionKey}:${rowKey}`;
@@ -399,6 +419,17 @@ export default function LancamentosPage() {
         };
       });
     });
+  };
+
+  const updateParcelInfo = (rowKey: string, field: 'current' | 'total', value: string) => {
+    setParcelInfo((current) => ({
+      ...current,
+      [rowKey]: {
+        current: current[rowKey]?.current || '',
+        total: current[rowKey]?.total || '',
+        [field]: value.replace(/\D/g, ''),
+      },
+    }));
   };
 
   const toggleGestora = (gestora: string) => {
@@ -979,10 +1010,39 @@ export default function LancamentosPage() {
                           {section.rows.map((row) => {
                             const values = entryValues[`${section.key}:${row.key}`] || [0, 0, 0, 0, 0];
                             const total = values.reduce((sum, value) => sum + Number(value || 0), 0);
+                            const isParcelRow = row.key.startsWith('parcelas_');
+                            const rowParcelInfo = parcelInfo[row.key] || { current: '', total: '' };
+                            const displayLabel = isParcelRow ? row.label.replace(/\s+\d+\s*\/\s*\d+$/, '') : row.label;
 
                             return (
                               <tr key={row.key} className="border-b border-border/80 last:border-b-0">
-                                <td className="px-4 py-3 font-medium text-foreground">{row.label}</td>
+                                <td className="px-4 py-3 font-medium text-foreground">
+                                  <div className="flex flex-wrap items-center gap-3">
+                                    <span>{displayLabel}</span>
+                                    {isParcelRow ? (
+                                      <div className="flex items-center gap-2 rounded-xl border border-border bg-background/80 px-2 py-1">
+                                        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                                          Parcela
+                                        </span>
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          value={rowParcelInfo.current}
+                                          onChange={(event) => updateParcelInfo(row.key, 'current', event.target.value)}
+                                          className="w-10 rounded-md border border-border bg-background px-2 py-1 text-center text-xs font-semibold outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                        />
+                                        <span className="text-sm text-muted-foreground">/</span>
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          value={rowParcelInfo.total}
+                                          onChange={(event) => updateParcelInfo(row.key, 'total', event.target.value)}
+                                          className="w-10 rounded-md border border-border bg-background px-2 py-1 text-center text-xs font-semibold outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                                        />
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </td>
                                 {values.map((value, weekIndex) => (
                                   <td key={`${row.key}-${weekIndex}`} className="px-4 py-3">
                                     <input

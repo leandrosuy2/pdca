@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
 import Cookies from 'js-cookie';
-import { AlertTriangle, Plus, Shield, Trash2, User, X } from 'lucide-react';
+import { AlertTriangle, Pencil, Plus, Shield, Trash2, User, X } from 'lucide-react';
 
 const decodeToken = (token: string) => {
   try {
@@ -25,8 +25,18 @@ export default function AdminUsersPage() {
   const [clearingUserId, setClearingUserId] = useState('');
   const [deletingUserId, setDeletingUserId] = useState('');
   const [deleteModalUser, setDeleteModalUser] = useState<any | null>(null);
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [updating, setUpdating] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    role: 'USER',
+    template: 'RESTAURANTE',
+    active: true,
+  });
+  const [editForm, setEditForm] = useState({
     name: '',
     email: '',
     password: '',
@@ -119,6 +129,81 @@ export default function AdminUsersPage() {
   const closeDeleteModal = () => {
     if (deletingUserId) return;
     setDeleteModalUser(null);
+  };
+
+  const openEditModal = (user: any) => {
+    setError('');
+    setEditingUser(user);
+    setEditForm({
+      name: user.name || '',
+      email: user.email || '',
+      password: '',
+      role: user.role || 'USER',
+      template: user.template || 'RESTAURANTE',
+      active: user.active !== false,
+    });
+  };
+
+  const closeEditModal = () => {
+    if (updating) return;
+    setEditingUser(null);
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+
+    setUpdating(true);
+    setError('');
+
+    try {
+      const response = await axios.patch(`${getUsersApiUrl()}/${editingUser.id}`, editForm, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      setUsers((prev) =>
+        prev
+          .map((item) => (item.id === editingUser.id ? response.data.user : item))
+          .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+      );
+      setEditingUser(null);
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Nao foi possivel atualizar o usuario.');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const getUserRoleLabel = (role: string) => {
+    if (role === 'ADMIN') return 'ADMIN';
+    if (role === 'DATA_ENTRY') return 'DATA_ENTRY';
+    if (role === 'UNIT_ENTRY') return 'UNIT_ENTRY';
+    return 'USER';
+  };
+
+  const getUserModelPresentation = (user: any) => {
+    if (user.role === 'UNIT_ENTRY') {
+      return {
+        label: 'Lancamento',
+        detail: user.launchUnit?.name ? `Unidade ${user.launchUnit.name}` : 'Acesso por unidade',
+        className: 'border-amber-500/30 bg-amber-500/10 text-amber-700',
+      };
+    }
+
+    if (user.role === 'DATA_ENTRY') {
+      return {
+        label: 'Input administrativo',
+        detail: 'Operacao geral de lancamentos',
+        className: 'border-sky-500/30 bg-sky-500/10 text-sky-700',
+      };
+    }
+
+    const templateMeta = getDashboardTemplateMeta(user.template);
+    return {
+      label: templateMeta.label,
+      detail: 'Modelo base do dashboard',
+      className: 'border-border bg-background text-foreground',
+    };
   };
 
   const handleDeleteUser = async () => {
@@ -268,9 +353,28 @@ export default function AdminUsersPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="mb-5 grid gap-3 md:grid-cols-4">
+            <div className="rounded-2xl border border-border/70 bg-background px-4 py-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Administradores</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{users.filter((user) => user.role === 'ADMIN').length}</div>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-background px-4 py-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Usuarios comuns</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{users.filter((user) => user.role === 'USER').length}</div>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-background px-4 py-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Input admin</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{users.filter((user) => user.role === 'DATA_ENTRY').length}</div>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-background px-4 py-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Usuarios de lancamento</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{users.filter((user) => user.role === 'UNIT_ENTRY').length}</div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-2xl border border-border/70">
             <table className="w-full min-w-[820px] border-collapse text-sm">
-              <thead>
+              <thead className="bg-muted/30">
                 <tr className="border-b border-border">
                   {['Usuario', 'E-mail', 'Perfil', 'Modelo', 'Status', 'Criado em', 'Acoes'].map((header) => (
                     <th key={header} className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
@@ -282,26 +386,36 @@ export default function AdminUsersPage() {
               <tbody>
                 {users.map((user) => {
                   const isCurrentUser = String(currentUser?.sub || currentUser?.id || '') === String(user.id);
-                  const templateMeta = getDashboardTemplateMeta(user.template);
+                  const modelMeta = getUserModelPresentation(user);
 
                   return (
-                    <tr key={user.id} className="border-b border-border/60">
-                      <td className="px-3 py-4 font-medium text-foreground">{user.name}</td>
+                    <tr key={user.id} className="border-b border-border/60 transition hover:bg-muted/20">
+                      <td className="px-3 py-4">
+                        <div className="font-medium text-foreground">{user.name}</div>
+                        {user.launchUnit?.name ? (
+                          <div className="text-xs text-muted-foreground">Vinculado a {user.launchUnit.name}</div>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-4 text-muted-foreground">{user.email}</td>
                       <td className="px-3 py-4">
                         <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${
                           user.role === 'ADMIN'
                             ? 'bg-primary/10 text-primary'
-                            : 'bg-secondary text-secondary-foreground'
+                            : user.role === 'DATA_ENTRY'
+                              ? 'bg-sky-500/10 text-sky-700'
+                              : user.role === 'UNIT_ENTRY'
+                                ? 'bg-amber-500/10 text-amber-700'
+                                : 'bg-secondary text-secondary-foreground'
                         }`}>
                           {user.role === 'ADMIN' ? <Shield size={12} /> : <User size={12} />}
-                          {user.role}
+                          {getUserRoleLabel(user.role)}
                         </span>
                       </td>
                       <td className="px-3 py-4">
-                        <span className="inline-flex rounded-full border border-border bg-background px-3 py-1 text-xs font-semibold text-foreground">
-                          {templateMeta.label}
-                        </span>
+                        <div className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${modelMeta.className}`}>
+                          {modelMeta.label}
+                        </div>
+                        <div className="mt-1 text-xs text-muted-foreground">{modelMeta.detail}</div>
                       </td>
                       <td className="px-3 py-4">
                         <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
@@ -315,6 +429,13 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-3 py-4">
                         <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => openEditModal(user)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition hover:bg-primary/15"
+                          >
+                            <Pencil size={14} />
+                            Editar usuario
+                          </button>
                           <button
                             onClick={() => handleClearDashboardData(user)}
                             disabled={clearingUserId === user.id}
@@ -410,6 +531,148 @@ export default function AdminUsersPage() {
                 {deletingUserId ? 'Excluindo usuario...' : 'Confirmar exclusao'}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editingUser ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-user-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target !== e.currentTarget) return;
+            closeEditModal();
+          }}
+        >
+          <div
+            className="w-full max-w-2xl rounded-3xl border border-border bg-card p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="edit-user-modal-title" className="text-lg font-bold text-foreground">
+                  Editar usuario
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Atualize os dados do perfil e o modelo exibido na administracao.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEditModal}
+                disabled={updating}
+                className="rounded-full border border-border p-2 text-muted-foreground transition hover:bg-muted disabled:opacity-50"
+                aria-label="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateUser} className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Nome</label>
+                  <input
+                    value={editForm.name}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                    className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">E-mail / Login</label>
+                  <input
+                    value={editForm.email}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
+                    className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Perfil</label>
+                  <select
+                    value={editForm.role}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, role: e.target.value }))}
+                    className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="USER">Usuario</option>
+                    <option value="ADMIN">Administrador</option>
+                    <option value="DATA_ENTRY">Input admin</option>
+                    <option value="UNIT_ENTRY">Lancamento</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Status</label>
+                  <button
+                    type="button"
+                    onClick={() => setEditForm((prev) => ({ ...prev, active: !prev.active }))}
+                    className={`w-full rounded-xl border px-4 py-3 text-sm font-medium transition ${
+                      editForm.active
+                        ? 'border-primary/40 bg-primary/10 text-primary'
+                        : 'border-border bg-background text-muted-foreground'
+                    }`}
+                  >
+                    {editForm.active ? 'Ativo' : 'Inativo'}
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Modelo</label>
+                  <select
+                    value={editForm.template}
+                    onChange={(e) => setEditForm((prev) => ({ ...prev, template: e.target.value }))}
+                    disabled={editForm.role === 'UNIT_ENTRY'}
+                    className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {DASHBOARD_TEMPLATE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Nova senha</label>
+                <input
+                  type="password"
+                  value={editForm.password}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, password: e.target.value }))}
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  placeholder="Deixe em branco para manter a senha atual"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                {editForm.role === 'UNIT_ENTRY'
+                  ? 'Usuarios de lancamento aparecem com o modelo visual "Lancamento" e seguem vinculados a uma unidade especifica.'
+                  : getDashboardTemplateMeta(editForm.template).description}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  disabled={updating}
+                  className="rounded-xl border border-border px-4 py-2.5 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
+                >
+                  <Pencil size={16} />
+                  {updating ? 'Salvando...' : 'Salvar alteracoes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       ) : null}

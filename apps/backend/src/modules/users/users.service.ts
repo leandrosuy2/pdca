@@ -298,6 +298,114 @@ export class UsersService {
     return { user };
   }
 
+  async updateUser(currentUser: any, userId: string, payload: Record<string, any>) {
+    this.ensureAdmin(currentUser);
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        launchUnitId: true,
+      },
+    });
+
+    if (!existingUser) {
+      throw new NotFoundException('Usuario nao encontrado.');
+    }
+
+    const name = String(payload.name || '').trim();
+    const email = String(payload.email || '').trim().toLowerCase();
+    const password = String(payload.password || '');
+    const role = String(payload.role || existingUser.role).toUpperCase();
+    const template = normalizeDashboardTemplate(payload.template);
+    const active = payload.active !== false;
+    const launchUnitId =
+      payload.launchUnitId === undefined
+        ? existingUser.launchUnitId
+        : payload.launchUnitId
+          ? String(payload.launchUnitId).trim()
+          : null;
+
+    if (!name || !email) {
+      throw new BadRequestException('Nome e e-mail sao obrigatorios.');
+    }
+
+    if (!['ADMIN', 'USER', 'DATA_ENTRY', 'UNIT_ENTRY'].includes(role)) {
+      throw new BadRequestException('Perfil invalido. Use ADMIN, USER, DATA_ENTRY ou UNIT_ENTRY.');
+    }
+
+    if (role === 'UNIT_ENTRY' && !launchUnitId) {
+      throw new BadRequestException('Usuarios UNIT_ENTRY precisam de uma unidade vinculada.');
+    }
+
+    const duplicatedEmail = await this.prisma.user.findFirst({
+      where: {
+        email,
+        id: { not: userId },
+      },
+      select: { id: true },
+    });
+
+    if (duplicatedEmail) {
+      throw new BadRequestException('Ja existe um usuario com este e-mail.');
+    }
+
+    if (launchUnitId) {
+      const unit = await this.prisma.unidade.findUnique({
+        where: { id: launchUnitId },
+        select: {
+          id: true,
+          launchInputUser: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      });
+
+      if (!unit) {
+        throw new BadRequestException('Unidade vinculada nao encontrada.');
+      }
+
+      if (unit.launchInputUser && unit.launchInputUser.id !== userId) {
+        throw new BadRequestException('Esta unidade ja possui um usuario de lancamento vinculado.');
+      }
+    }
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        name,
+        email,
+        role,
+        template,
+        active,
+        launchUnitId: role === 'UNIT_ENTRY' ? launchUnitId : null,
+        ...(password ? { password: await bcrypt.hash(password, 10) } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        template: true,
+        active: true,
+        launchUnit: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return { user };
+  }
+
   async clearUserDashboardData(currentUser: any, userId: string) {
     this.ensureAdmin(currentUser);
 

@@ -125,44 +125,61 @@ export default function AdminInteligenciaPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-10">
-      <header className="flex flex-col gap-4 border-b border-border pb-8 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">
-            <Sparkles size={14} />
-            Painel global
+      <header className="border-b border-border pb-8">
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">
+              <Sparkles size={14} />
+              Painel global
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">Inteligencia consolidada</h1>
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Consolidacao geral da empresa por gestao, com ranking, trimestres, alertas e previsao simples.
+            </p>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight">Inteligencia consolidada</h1>
-          <p className="max-w-2xl text-sm text-muted-foreground">
-            Consolidacao geral da empresa por gestao, com ranking, trimestres, alertas e previsao simples.
-          </p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
-            Ano
-            <input
-              type="number"
-              min={2020}
-              max={2035}
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-              className="w-32 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
-            Gestao
-            <select
-              value={gestao}
-              onChange={(e) => setGestao(e.target.value)}
-              className="w-44 rounded-lg border border-border bg-background px-3 py-2 text-sm"
-            >
-              <option value="all">Todas</option>
-              {(data?.managements || []).map((item: string) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+              Ano
+              <input
+                type="number"
+                min={2020}
+                max={2035}
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+                className="w-28 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+              />
+            </label>
+            <div className="flex flex-col gap-2 text-xs font-medium text-muted-foreground">
+              <span>Gestao</span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setGestao('all')}
+                  className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                    gestao === 'all'
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border bg-background text-foreground hover:border-primary/40 hover:bg-primary/5'
+                  }`}
+                >
+                  Todas
+                </button>
+                {(data?.managements || []).map((item: string) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setGestao(item)}
+                    className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
+                      gestao === item
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-background text-foreground hover:border-primary/40 hover:bg-primary/5'
+                    }`}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -329,7 +346,7 @@ export default function AdminInteligenciaPage() {
 
       <section className="grid gap-6 lg:grid-cols-2">
         <div className="rounded-2xl border border-border bg-card p-6">
-          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="mb-6 space-y-5">
             <div>
               <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                 <TrendingUp className="h-4 w-4" />
@@ -339,7 +356,7 @@ export default function AdminInteligenciaPage() {
                 Comparativo direto entre faturamento, despesa total e FOPEG para leitura rapida por trimestre.
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-3">
               <div className="rounded-2xl border border-border/70 bg-background px-4 py-3">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Faturamento anual</div>
                 <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">{brl(totalFaturamento)}</div>
@@ -354,13 +371,13 @@ export default function AdminInteligenciaPage() {
               </div>
             </div>
           </div>
-          <div className="h-56 w-full">
+          <div className="h-72 w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data?.quarters || []}>
+              <BarChart data={data?.quarters || []} barCategoryGap={28} margin={{ top: 28, right: 12, left: 6, bottom: 12 }}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                 <XAxis dataKey="key" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
                 <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" tickFormatter={axisK} />
-                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
+                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '18px' }} />
                 <Tooltip formatter={(value, name) => [brlFromUnknown(value), String(name ?? '')]} />
                 <Bar dataKey="faturamento" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} name="Faturamento">
                   <LabelList dataKey="faturamento" position="top" formatter={(value: unknown) => brlCompact(Number(value || 0))} />
